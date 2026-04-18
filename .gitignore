@@ -1,0 +1,14 @@
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+.mesh-smoke/
+*.db
+*.sqlite
+*.sqlite3
+
+.pytest_cache/
+.coverage
+htmlcov/
