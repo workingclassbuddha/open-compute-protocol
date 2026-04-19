@@ -9,6 +9,7 @@ import base64
 import dataclasses
 import datetime as dt
 import hashlib
+import ipaddress
 import json
 import logging
 import os
@@ -203,9 +204,306 @@ def _normalize_resources(raw: Optional[dict]) -> dict:
             normalized["gpus"] = max(0, int(data.get("gpus") or 0))
         except Exception:
             pass
+    if data.get("gpu_vram_mb") is not None:
+        try:
+            normalized["gpu_vram_mb"] = max(0, int(data.get("gpu_vram_mb") or 0))
+        except Exception:
+            pass
+    if data.get("gpu_class") is not None:
+        normalized["gpu_class"] = _normalize_gpu_class(data.get("gpu_class"))
+    if data.get("workload_class") is not None:
+        normalized["workload_class"] = _normalize_workload_class(data.get("workload_class"))
     if data.get("network") is not None:
         normalized["network"] = str(data.get("network") or "").strip().lower() or "default"
     return normalized
+
+
+GPU_CLASSES = {"none", "cuda", "rocm", "metal", "mps", "vulkan", "directml", "generic"}
+WORKLOAD_CLASSES = {
+    "default",
+    "cpu_bound",
+    "io_bound",
+    "gpu_inference",
+    "gpu_training",
+    "mixed",
+}
+MISSION_STATUSES = {
+    "planned",
+    "active",
+    "waiting",
+    "checkpointed",
+    "completed",
+    "failed",
+    "cancelled",
+}
+MISSION_PRIORITIES = {"low", "normal", "high", "critical"}
+
+
+def _normalize_gpu_class(value: Any) -> str:
+    token = str(value or "").strip().lower().replace("-", "_")
+    if not token:
+        return "none"
+    alias = {
+        "apple": "metal",
+        "apple_silicon": "metal",
+        "nvidia": "cuda",
+        "amd": "rocm",
+        "intel": "vulkan",
+        "pytorch_mps": "mps",
+        "d3d12": "directml",
+        "gpu": "generic",
+    }
+    token = alias.get(token, token)
+    if token in GPU_CLASSES:
+        return token
+    return "generic"
+
+
+def _normalize_workload_class(value: Any) -> str:
+    token = str(value or "").strip().lower()
+    if not token:
+        return "default"
+    alias = {
+        "cpu": "cpu_bound",
+        "gpu": "gpu_inference",
+        "training": "gpu_training",
+        "inference": "gpu_inference",
+        "io": "io_bound",
+    }
+    token = alias.get(token, token)
+    if token in WORKLOAD_CLASSES:
+        return token
+    return "default"
+
+
+def _normalize_mission_status(value: Any) -> str:
+    token = str(value or "").strip().lower() or "planned"
+    aliases = {
+        "pending": "planned",
+        "queued": "waiting",
+        "accepted": "waiting",
+        "retry_wait": "waiting",
+        "running": "active",
+        "resuming": "active",
+        "attention": "failed",
+        "rejected": "failed",
+        "canceled": "cancelled",
+    }
+    token = aliases.get(token, token)
+    if token in MISSION_STATUSES:
+        return token
+    return "planned"
+
+
+def _normalize_mission_priority(value: Any) -> str:
+    token = str(value or "").strip().lower() or "normal"
+    aliases = {"medium": "normal", "urgent": "critical"}
+    token = aliases.get(token, token)
+    if token in MISSION_PRIORITIES:
+        return token
+    return "normal"
+
+
+def _normalize_target_strategy(value: Any, *, default: str = "local") -> str:
+    token = str(value or "").strip().lower()
+    token = re.sub(r"[^a-z0-9]+", "_", token).strip("_")
+    if not token:
+        return default
+    aliases = {
+        "local_only": "local",
+        "single_local": "local",
+        "remote_only": "remote",
+        "gpu_aware": "cooperative_gpu_aware",
+    }
+    return aliases.get(token, token)
+
+
+def _normalize_mission_policy(raw: Optional[dict]) -> dict:
+    data = dict(raw or {})
+    normalized = _normalize_policy(data)
+    for key in ("allow_local", "allow_remote", "auto_enlist", "approval_required", "max_parallel_jobs"):
+        if key in data:
+            normalized[key] = data[key]
+    for key, value in data.items():
+        if key not in normalized:
+            normalized[key] = value
+    return normalized
+
+
+def _normalize_mission_continuity(raw: Optional[dict]) -> dict:
+    data = dict(raw or {})
+    resumable = _coerce_bool(
+        data.get("resumable")
+        if "resumable" in data
+        else data.get("preserve_across_restart", True)
+    )
+    checkpoint_strategy = str(data.get("checkpoint_strategy") or ("inherit" if resumable else "none")).strip().lower()
+    if checkpoint_strategy not in {"inherit", "none", "manual", "on_failure", "on_retry"}:
+        checkpoint_strategy = "inherit" if resumable else "none"
+    continuity = {
+        "mode": str(data.get("mode") or ("durable" if resumable else "ephemeral")).strip().lower() or "durable",
+        "resumable": resumable,
+        "checkpoint_strategy": checkpoint_strategy,
+        "allow_handoff": _coerce_bool(data.get("allow_handoff") if "allow_handoff" in data else True),
+        "preserve_result_lineage": _coerce_bool(
+            data.get("preserve_result_lineage") if "preserve_result_lineage" in data else True
+        ),
+    }
+    if data.get("notes"):
+        continuity["notes"] = str(data.get("notes") or "")
+    if data.get("status_hint"):
+        continuity["status_hint"] = _normalize_mission_status(data.get("status_hint"))
+    for key, value in data.items():
+        if key not in continuity:
+            continuity[key] = value
+    return continuity
+
+
+def _normalize_compute_profile(raw: Optional[dict], device_class: str, execution_tier: str) -> dict:
+    data = dict(raw or {})
+    cpu_defaults = {
+        "heavy": {"cpu_cores": 16, "memory_mb": 32768},
+        "standard": {"cpu_cores": 8, "memory_mb": 16384},
+        "light": {"cpu_cores": 4, "memory_mb": 6144},
+        "control": {"cpu_cores": 2, "memory_mb": 2048},
+        "sensor": {"cpu_cores": 1, "memory_mb": 512},
+    }.get(execution_tier, {"cpu_cores": 4, "memory_mb": 8192})
+    cpu_cores = max(0, int(data.get("cpu_cores") or data.get("cpu") or cpu_defaults["cpu_cores"]))
+    cpu_threads_raw = data.get("cpu_threads")
+    cpu_threads = max(cpu_cores, int(cpu_threads_raw or cpu_cores))
+    memory_mb = max(0, int(data.get("memory_mb") or cpu_defaults["memory_mb"]))
+    disk_mb_raw = data.get("disk_mb")
+    disk_mb = max(0, int(disk_mb_raw or 0))
+    gpu_count = max(0, int(data.get("gpu_count") or data.get("gpus") or 0))
+    gpu_class = _normalize_gpu_class(data.get("gpu_class"))
+    if gpu_count <= 0:
+        gpu_class = "none"
+    elif gpu_class == "none":
+        gpu_class = "generic"
+    gpu_vram_mb = max(0, int(data.get("gpu_vram_mb") or 0))
+    fp16_tflops_raw = data.get("fp16_tflops") or data.get("fp16_throughput_tflops") or 0
+    try:
+        fp16_tflops = max(0.0, float(fp16_tflops_raw))
+    except Exception:
+        fp16_tflops = 0.0
+    accelerators = _unique_tokens(data.get("accelerators"))
+    if gpu_count > 0 and gpu_class not in {"none", ""}:
+        if gpu_class not in accelerators:
+            accelerators.append(gpu_class)
+    raw_supports = data.get("supports_workload_classes") or data.get("workload_classes") or []
+    supports = []
+    for item in raw_supports:
+        normalized = _normalize_workload_class(item)
+        if normalized not in supports:
+            supports.append(normalized)
+    if not supports:
+        default_supports = ["default", "cpu_bound", "io_bound"]
+        if gpu_count > 0:
+            default_supports.extend(["gpu_inference", "mixed"])
+            if gpu_vram_mb >= 16384 and execution_tier in {"heavy", "standard"}:
+                default_supports.append("gpu_training")
+        supports = default_supports
+    compute_tags = _unique_tokens(data.get("compute_tags"))
+    if gpu_count > 0 and "gpu" not in compute_tags:
+        compute_tags.append("gpu")
+    if gpu_count > 0 and gpu_vram_mb >= 16384 and "large_gpu" not in compute_tags:
+        compute_tags.append("large_gpu")
+    if cpu_cores >= 16 and "cpu_heavy" not in compute_tags:
+        compute_tags.append("cpu_heavy")
+    return {
+        "cpu_cores": cpu_cores,
+        "cpu_threads": cpu_threads,
+        "memory_mb": memory_mb,
+        "disk_mb": disk_mb,
+        "gpu_count": gpu_count,
+        "gpu_class": gpu_class,
+        "gpu_vram_mb": gpu_vram_mb,
+        "fp16_tflops": round(fp16_tflops, 3),
+        "accelerators": accelerators,
+        "supports_workload_classes": supports,
+        "compute_tags": compute_tags,
+        "gpu_capable": bool(gpu_count > 0),
+    }
+
+
+def _normalize_offload_policy(raw: Optional[dict], profile: Optional[dict] = None) -> dict:
+    data = dict(raw or {})
+    base_profile = dict(profile or {})
+    device_class = str(base_profile.get("device_class") or "full").strip().lower() or "full"
+    power_profile = str(base_profile.get("power_profile") or "line_powered").strip().lower() or "line_powered"
+    default_enabled = device_class in {"full", "relay"}
+    enabled = _coerce_bool(data.get("enabled")) if "enabled" in data else default_enabled
+    mode = str(data.get("mode") or ("approval" if device_class in {"full", "relay"} else "manual")).strip().lower() or "manual"
+    if mode not in {"manual", "approval", "auto"}:
+        mode = "manual"
+    threshold = str(data.get("pressure_threshold") or ("saturated" if power_profile in {"battery", "mixed"} else "elevated")).strip().lower() or "elevated"
+    if threshold not in {"idle", "nominal", "elevated", "saturated"}:
+        threshold = "elevated"
+    allowed_trust_tiers = _unique_tokens(data.get("allowed_trust_tiers") or ["trusted", "partner"])
+    if not allowed_trust_tiers:
+        allowed_trust_tiers = ["trusted", "partner"]
+    allowed_device_classes = _unique_tokens(data.get("allowed_device_classes") or ["full", "relay"])
+    if not allowed_device_classes:
+        allowed_device_classes = ["full", "relay"]
+    approval_trust_tiers = _unique_tokens(data.get("approval_trust_tiers") or ["partner", "market", "public"])
+    approval_device_classes = _unique_tokens(data.get("approval_device_classes") or ["light", "micro"])
+    max_auto_enlist = max(1, int(data.get("max_auto_enlist") or 2))
+    min_candidate_score = int(data.get("min_candidate_score") or 0)
+    allow_battery_helpers = _coerce_bool(data.get("allow_battery_helpers")) if "allow_battery_helpers" in data else False
+    allow_remote_seek = _coerce_bool(data.get("allow_remote_seek")) if "allow_remote_seek" in data else False
+    notify_on_action = _coerce_bool(data.get("notify_on_action")) if "notify_on_action" in data else True
+    approval_for_gpu_helpers = (
+        _coerce_bool(data.get("approval_for_gpu_helpers"))
+        if "approval_for_gpu_helpers" in data
+        else True
+    )
+    allowed_workload_classes = _unique_tokens(data.get("allowed_workload_classes") or [])
+    approval_workload_classes = _unique_tokens(data.get("approval_workload_classes") or [])
+    target_device_classes = _unique_tokens(data.get("target_device_classes") or ["full", "light", "micro"])
+    return {
+        "enabled": bool(enabled),
+        "mode": mode,
+        "pressure_threshold": threshold,
+        "max_auto_enlist": max_auto_enlist,
+        "min_candidate_score": min_candidate_score,
+        "allowed_trust_tiers": allowed_trust_tiers,
+        "allowed_device_classes": allowed_device_classes,
+        "approval_trust_tiers": approval_trust_tiers,
+        "approval_device_classes": approval_device_classes,
+        "allow_battery_helpers": bool(allow_battery_helpers),
+        "allow_remote_seek": bool(allow_remote_seek),
+        "notify_on_action": bool(notify_on_action),
+        "approval_for_gpu_helpers": bool(approval_for_gpu_helpers),
+        "allowed_workload_classes": allowed_workload_classes,
+        "approval_workload_classes": approval_workload_classes,
+        "target_device_classes": target_device_classes,
+    }
+
+
+def _pressure_rank(value: Any) -> int:
+    token = str(value or "idle").strip().lower() or "idle"
+    return {
+        "idle": 0,
+        "nominal": 1,
+        "elevated": 2,
+        "saturated": 3,
+    }.get(token, 0)
+
+
+def _normalize_preference_token(value: Any) -> str:
+    token = str(value or "").strip().lower() or "allow"
+    aliases = {
+        "preferred": "prefer",
+        "preferred_auto": "prefer",
+        "never": "deny",
+        "blocked": "deny",
+        "ask": "approval",
+        "manual": "approval",
+    }
+    token = aliases.get(token, token)
+    if token not in {"prefer", "allow", "approval", "avoid", "deny"}:
+        token = "allow"
+    return token
 
 
 def _unique_tokens(values: Any) -> list[str]:
@@ -315,6 +613,26 @@ def _normalize_device_profile(raw: Optional[dict]) -> dict:
         roles.append("storage")
     if approval_capable and "approval" not in roles and device_class in {"light", "micro"}:
         roles.append("approval")
+    compute_profile = _normalize_compute_profile(
+        data.get("compute_profile") or {},
+        device_class=device_class,
+        execution_tier=execution_tier,
+    )
+    helper_state_token = str(data.get("helper_state") or "active").strip().lower()
+    if helper_state_token not in {"active", "draining", "retired"}:
+        helper_state_token = "active"
+    helper_role = str(data.get("helper_role") or "").strip().lower()
+    if helper_role not in {"", "controller", "helper", "relay", "drain"}:
+        helper_role = ""
+    if compute_profile["gpu_capable"]:
+        if "gpu_helper" not in labels:
+            labels.append("gpu_helper")
+        if "compute" not in roles:
+            roles.append("compute")
+    offload_policy = _normalize_offload_policy(data.get("offload_policy") or {}, {
+        "device_class": device_class,
+        "power_profile": power_profile,
+    })
     return {
         "device_class": device_class,
         "execution_tier": execution_tier,
@@ -334,6 +652,10 @@ def _normalize_device_profile(raw: Optional[dict]) -> dict:
         "offline_grace_seconds": offline_grace_seconds,
         "labels": labels,
         "roles": roles,
+        "compute_profile": compute_profile,
+        "helper_state": helper_state_token,
+        "helper_role": helper_role,
+        "offload_policy": offload_policy,
     }
 
 
@@ -561,6 +883,27 @@ class MeshJob:
         return dataclasses.asdict(self)
 
 
+@dataclasses.dataclass
+class MissionRecord:
+    id: str
+    request_id: str
+    title: str
+    intent: str
+    status: str
+    priority: str
+    workload_class: str
+    origin_peer_id: str
+    target_strategy: str
+    policy: dict[str, Any]
+    continuity: dict[str, Any]
+    metadata: dict[str, Any]
+    created_at: str
+    updated_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return dataclasses.asdict(self)
+
+
 class GolemMeshAdapter:
     def __init__(self, *, enabled: bool = False):
         self.enabled = bool(enabled)
@@ -632,6 +975,49 @@ class MeshPeerClient:
             payload["peer_id"] = peer_id
         return self._request_json("POST", "/mesh/peers/sync", payload=payload)
 
+    def list_discovery_candidates(self, *, limit: int = 25, status: str = "") -> dict:
+        return self._request_json("GET", "/mesh/discovery/candidates", params={"limit": limit, "status": status})
+
+    def seek_peers(self, payload: dict) -> dict:
+        return self._request_json("POST", "/mesh/discovery/seek", payload=payload)
+
+    def mesh_pressure(self) -> dict:
+        return self._request_json("GET", "/mesh/pressure")
+
+    def list_helpers(self, *, limit: int = 100) -> dict:
+        return self._request_json("GET", "/mesh/helpers", params={"limit": limit})
+
+    def list_offload_preferences(self, *, limit: int = 100, peer_id: str = "", workload_class: str = "") -> dict:
+        return self._request_json(
+            "GET",
+            "/mesh/helpers/preferences",
+            params={"limit": limit, "peer_id": peer_id, "workload_class": workload_class},
+        )
+
+    def set_offload_preference(self, payload: dict) -> dict:
+        return self._request_json("POST", "/mesh/helpers/preferences/set", payload=payload)
+
+    def plan_helper_enlistment(self, payload: dict) -> dict:
+        return self._request_json("POST", "/mesh/helpers/plan", payload=payload)
+
+    def enlist_helper(self, payload: dict) -> dict:
+        return self._request_json("POST", "/mesh/helpers/enlist", payload=payload)
+
+    def drain_helper(self, payload: dict) -> dict:
+        return self._request_json("POST", "/mesh/helpers/drain", payload=payload)
+
+    def retire_helper(self, payload: dict) -> dict:
+        return self._request_json("POST", "/mesh/helpers/retire", payload=payload)
+
+    def auto_seek_help(self, payload: dict) -> dict:
+        return self._request_json("POST", "/mesh/helpers/auto-seek", payload=payload)
+
+    def evaluate_autonomous_offload(self) -> dict:
+        return self._request_json("GET", "/mesh/helpers/autonomy")
+
+    def run_autonomous_offload(self, payload: dict) -> dict:
+        return self._request_json("POST", "/mesh/helpers/autonomy/run", payload=payload)
+
     def handshake(self, envelope: dict) -> dict:
         return self._request_json("POST", "/mesh/handshake", payload=envelope)
 
@@ -640,6 +1026,57 @@ class MeshPeerClient:
 
     def schedule_job(self, payload: dict) -> dict:
         return self._request_json("POST", "/mesh/jobs/schedule", payload=payload)
+
+    def launch_cooperative_task(self, payload: dict) -> dict:
+        return self._request_json("POST", "/mesh/cooperative-tasks/launch", payload=payload)
+
+    def list_cooperative_tasks(self, *, limit: int = 25, state: str = "") -> dict:
+        return self._request_json("GET", "/mesh/cooperative-tasks", params={"limit": limit, "state": state})
+
+    def get_cooperative_task(self, task_id: str) -> dict:
+        return self._request_json("GET", f"/mesh/cooperative-tasks/{task_id}")
+
+    def list_missions(self, *, limit: int = 25, status: str = "") -> dict:
+        return self._request_json("GET", "/mesh/missions", params={"limit": limit, "status": status})
+
+    def get_mission(self, mission_id: str) -> dict:
+        return self._request_json("GET", f"/mesh/missions/{mission_id}")
+
+    def launch_mission(self, payload: dict) -> dict:
+        return self._request_json("POST", "/mesh/missions/launch", payload=payload)
+
+    def cancel_mission(self, mission_id: str, *, reason: str = "mission_cancelled", operator_id: str = "") -> dict:
+        payload = {"reason": reason}
+        if operator_id:
+            payload["operator_id"] = operator_id
+        return self._request_json("POST", f"/mesh/missions/{mission_id}/cancel", payload=payload)
+
+    def resume_mission(self, mission_id: str, *, reason: str = "mission_resume_latest", operator_id: str = "") -> dict:
+        payload = {"reason": reason}
+        if operator_id:
+            payload["operator_id"] = operator_id
+        return self._request_json("POST", f"/mesh/missions/{mission_id}/resume", payload=payload)
+
+    def resume_mission_from_checkpoint(
+        self,
+        mission_id: str,
+        *,
+        reason: str = "mission_resume_checkpoint",
+        operator_id: str = "",
+        checkpoint_artifact_id: str = "",
+    ) -> dict:
+        payload = {"reason": reason}
+        if operator_id:
+            payload["operator_id"] = operator_id
+        if checkpoint_artifact_id:
+            payload["checkpoint_artifact_id"] = checkpoint_artifact_id
+        return self._request_json("POST", f"/mesh/missions/{mission_id}/resume-from-checkpoint", payload=payload)
+
+    def restart_mission(self, mission_id: str, *, reason: str = "mission_restart", operator_id: str = "") -> dict:
+        payload = {"reason": reason}
+        if operator_id:
+            payload["operator_id"] = operator_id
+        return self._request_json("POST", f"/mesh/missions/{mission_id}/restart", payload=payload)
 
     def list_scheduler_decisions(self, *, limit: int = 25, status: str = "", target_type: str = "") -> dict:
         return self._request_json(
@@ -1195,6 +1632,16 @@ class SovereignMesh:
         ):
             if key not in incoming:
                 current.pop(key, None)
+        if "compute_profile" in incoming:
+            current_compute = dict(current.get("compute_profile") or {})
+            incoming_compute = dict(incoming.get("compute_profile") or {})
+            current_compute.update(incoming_compute)
+            incoming["compute_profile"] = current_compute
+        if "offload_policy" in incoming:
+            current_offload = dict(current.get("offload_policy") or {})
+            incoming_offload = dict(incoming.get("offload_policy") or {})
+            current_offload.update(incoming_offload)
+            incoming["offload_policy"] = current_offload
         current.update(incoming)
         self.device_profile = self._load_or_create_device_profile(explicit_device_profile=current)
         return {
@@ -1386,6 +1833,56 @@ class SovereignMesh:
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     last_heartbeat_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS mesh_discovery_candidates (
+                    base_url TEXT PRIMARY KEY,
+                    peer_id TEXT DEFAULT '',
+                    display_name TEXT DEFAULT '',
+                    endpoint_url TEXT DEFAULT '',
+                    status TEXT DEFAULT 'discovered',
+                    trust_tier TEXT DEFAULT 'trusted',
+                    device_profile TEXT DEFAULT '{}',
+                    manifest TEXT DEFAULT '{}',
+                    metadata TEXT DEFAULT '{}',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    last_error TEXT DEFAULT '',
+                    last_error_at TEXT DEFAULT ''
+                );
+                CREATE TABLE IF NOT EXISTS mesh_cooperative_tasks (
+                    id TEXT PRIMARY KEY,
+                    request_id TEXT UNIQUE,
+                    name TEXT DEFAULT '',
+                    strategy TEXT DEFAULT 'spread',
+                    base_job TEXT DEFAULT '{}',
+                    shard_count INTEGER DEFAULT 0,
+                    shard_jobs TEXT DEFAULT '[]',
+                    target_peers TEXT DEFAULT '[]',
+                    metadata TEXT DEFAULT '{}',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS mesh_missions (
+                    id TEXT PRIMARY KEY,
+                    request_id TEXT UNIQUE,
+                    title TEXT DEFAULT '',
+                    intent TEXT DEFAULT '',
+                    status TEXT DEFAULT 'planned',
+                    priority TEXT DEFAULT 'normal',
+                    workload_class TEXT DEFAULT 'default',
+                    origin_peer_id TEXT NOT NULL,
+                    target_strategy TEXT DEFAULT 'local',
+                    policy TEXT DEFAULT '{}',
+                    continuity TEXT DEFAULT '{}',
+                    metadata TEXT DEFAULT '{}',
+                    child_job_ids TEXT DEFAULT '[]',
+                    cooperative_task_ids TEXT DEFAULT '[]',
+                    latest_checkpoint_ref TEXT DEFAULT '{}',
+                    result_ref TEXT DEFAULT '{}',
+                    result_bundle_ref TEXT DEFAULT '{}',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
                 CREATE TABLE IF NOT EXISTS mesh_job_attempts (
                     id TEXT PRIMARY KEY,
                     job_id TEXT NOT NULL,
@@ -1440,6 +1937,16 @@ class SovereignMesh:
                     candidates TEXT DEFAULT '[]',
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS mesh_offload_preferences (
+                    peer_id TEXT NOT NULL,
+                    workload_class TEXT NOT NULL,
+                    preference TEXT DEFAULT 'allow',
+                    source TEXT DEFAULT 'operator',
+                    metadata TEXT DEFAULT '{}',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (peer_id, workload_class)
+                );
                 CREATE INDEX IF NOT EXISTS idx_mesh_events_created ON mesh_events(created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_mesh_remote_events_peer_created ON mesh_remote_events(peer_id, remote_seq DESC);
                 CREATE INDEX IF NOT EXISTS idx_mesh_leases_peer_status ON mesh_leases(peer_id, status);
@@ -1449,11 +1956,15 @@ class SovereignMesh:
                 CREATE INDEX IF NOT EXISTS idx_mesh_notifications_target_status ON mesh_notifications(target_peer_id, target_agent_id, status, created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_mesh_approvals_target_status ON mesh_approvals(target_peer_id, target_agent_id, status, created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_mesh_workers_status ON mesh_workers(status, last_heartbeat_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_mesh_discovery_candidates_status ON mesh_discovery_candidates(status, last_seen_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_mesh_cooperative_tasks_created ON mesh_cooperative_tasks(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_mesh_missions_updated ON mesh_missions(status, updated_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_mesh_job_attempts_job ON mesh_job_attempts(job_id, attempt_number DESC);
                 CREATE INDEX IF NOT EXISTS idx_mesh_job_attempts_worker_status ON mesh_job_attempts(worker_id, status);
                 CREATE INDEX IF NOT EXISTS idx_mesh_queue_messages_status ON mesh_queue_messages(status, available_at ASC, updated_at ASC);
                 CREATE INDEX IF NOT EXISTS idx_mesh_queue_messages_dedupe ON mesh_queue_messages(dedupe_key, updated_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_mesh_scheduler_decisions_created ON mesh_scheduler_decisions(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_mesh_offload_preferences_updated ON mesh_offload_preferences(updated_at DESC);
                 """
             )
             queue_columns = {
@@ -1731,7 +2242,67 @@ class SovereignMesh:
                 available=True,
                 description="Durable notifications and approval inboxes for operator, phone, watch, and relay control flows.",
             ).to_dict(),
+            CapabilityCard(
+                name="peer-seek",
+                kind="coordination",
+                available=True,
+                description="Probe candidate peers, record discovery state, and optionally auto-connect to reachable organisms.",
+            ).to_dict(),
+            CapabilityCard(
+                name="cooperative-fanout",
+                kind="executor",
+                available=True,
+                description="Shard one larger task into child jobs and spread them across local and remote peers.",
+            ).to_dict(),
         ]
+        compute_profile = dict(self.device_profile.get("compute_profile") or {})
+        gpu_count = int(compute_profile.get("gpu_count") or 0)
+        gpu_class = str(compute_profile.get("gpu_class") or "none")
+        gpu_vram_mb = int(compute_profile.get("gpu_vram_mb") or 0)
+        supports_classes = list(compute_profile.get("supports_workload_classes") or [])
+        accelerators = list(compute_profile.get("accelerators") or [])
+        gpu_description_bits = []
+        if gpu_count > 0:
+            gpu_description_bits.append(f"{gpu_count}x {gpu_class.upper()}")
+            if gpu_vram_mb > 0:
+                gpu_description_bits.append(f"{gpu_vram_mb} MB VRAM")
+            if supports_classes:
+                gpu_description_bits.append("workloads: " + ",".join(supports_classes))
+        gpu_description = (
+            " / ".join(gpu_description_bits)
+            if gpu_description_bits
+            else "No GPU accelerators reported on this device."
+        )
+        cards.append(
+            CapabilityCard(
+                name="gpu-runtime",
+                kind="runtime",
+                available=bool(compute_profile.get("gpu_capable")),
+                description=f"GPU-aware execution and scheduling hints. {gpu_description}",
+                metadata={
+                    "gpu_count": gpu_count,
+                    "gpu_class": gpu_class,
+                    "gpu_vram_mb": gpu_vram_mb,
+                    "accelerators": accelerators,
+                    "supports_workload_classes": supports_classes,
+                    "cpu_cores": int(compute_profile.get("cpu_cores") or 0),
+                    "memory_mb": int(compute_profile.get("memory_mb") or 0),
+                    "fp16_tflops": float(compute_profile.get("fp16_tflops") or 0.0),
+                },
+            ).to_dict()
+        )
+        cards.append(
+            CapabilityCard(
+                name="helper-enlistment",
+                kind="coordination",
+                available=True,
+                description="Autonomous enlistment, drain, and retirement of helper peers for overflow compute.",
+                metadata={
+                    "helper_state": str(self.device_profile.get("helper_state") or "active"),
+                    "helper_role": str(self.device_profile.get("helper_role") or ""),
+                },
+            ).to_dict()
+        )
         cards.extend(self.golem_adapter.capability_cards())
         return cards
 
@@ -1973,6 +2544,8 @@ class SovereignMesh:
                 "notifications",
                 "approvals",
                 "secrets",
+                "peer-discovery",
+                "cooperative-tasks",
             ],
             transports=[
                 {"name": "http", "mode": "request-response"},
@@ -2398,6 +2971,2099 @@ class SovereignMesh:
                 "device_classes": device_counts,
             },
         }
+
+    def _row_to_discovery_candidate(self, row) -> Optional[dict]:
+        if row is None:
+            return None
+        return {
+            "base_url": row["base_url"] or "",
+            "peer_id": row["peer_id"] or "",
+            "display_name": row["display_name"] or "",
+            "endpoint_url": row["endpoint_url"] or "",
+            "status": row["status"] or "discovered",
+            "trust_tier": _normalize_trust_tier(row["trust_tier"]),
+            "device_profile": _normalize_device_profile(_loads_json(row["device_profile"], {})),
+            "manifest": _loads_json(row["manifest"], {}),
+            "metadata": _loads_json(row["metadata"], {}),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "last_seen_at": row["last_seen_at"] or "",
+            "last_error": row["last_error"] or "",
+            "last_error_at": row["last_error_at"] or "",
+        }
+
+    def _remember_discovery_candidate(
+        self,
+        *,
+        base_url: str,
+        peer_id: str = "",
+        display_name: str = "",
+        endpoint_url: str = "",
+        status: str = "discovered",
+        trust_tier: str = "trusted",
+        device_profile: Optional[dict] = None,
+        manifest: Optional[dict] = None,
+        metadata: Optional[dict] = None,
+        last_error: str = "",
+    ) -> dict:
+        base_token = str(base_url or "").rstrip("/")
+        if not base_token:
+            raise MeshPolicyError("discovery candidate base_url is required")
+        now = _utcnow()
+        with self._conn() as conn:
+            existing = conn.execute(
+                "SELECT * FROM mesh_discovery_candidates WHERE base_url=?",
+                (base_token,),
+            ).fetchone()
+            existing_metadata = _loads_json(existing["metadata"], {}) if existing is not None else {}
+            merged_metadata = {**existing_metadata, **dict(metadata or {})}
+            conn.execute(
+                """
+                INSERT INTO mesh_discovery_candidates
+                (base_url, peer_id, display_name, endpoint_url, status, trust_tier, device_profile, manifest, metadata,
+                 created_at, updated_at, last_seen_at, last_error, last_error_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(base_url) DO UPDATE SET
+                    peer_id=excluded.peer_id,
+                    display_name=excluded.display_name,
+                    endpoint_url=excluded.endpoint_url,
+                    status=excluded.status,
+                    trust_tier=excluded.trust_tier,
+                    device_profile=excluded.device_profile,
+                    manifest=excluded.manifest,
+                    metadata=excluded.metadata,
+                    updated_at=excluded.updated_at,
+                    last_seen_at=excluded.last_seen_at,
+                    last_error=excluded.last_error,
+                    last_error_at=excluded.last_error_at
+                """,
+                (
+                    base_token,
+                    str(peer_id or "").strip(),
+                    str(display_name or "").strip(),
+                    str(endpoint_url or "").strip() or base_token,
+                    str(status or "discovered").strip().lower() or "discovered",
+                    _normalize_trust_tier(trust_tier),
+                    json.dumps(_normalize_device_profile(device_profile or {})),
+                    json.dumps(dict(manifest or {})),
+                    json.dumps(merged_metadata),
+                    existing["created_at"] if existing is not None else now,
+                    now,
+                    now,
+                    str(last_error or ""),
+                    now if str(last_error or "").strip() else (existing["last_error_at"] if existing is not None else ""),
+                ),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM mesh_discovery_candidates WHERE base_url=?",
+                (base_token,),
+            ).fetchone()
+        return self._row_to_discovery_candidate(row) or {}
+
+    def list_discovery_candidates(self, *, limit: int = 25, status: str = "") -> dict:
+        query = ["SELECT * FROM mesh_discovery_candidates"]
+        params: list[Any] = []
+        status_token = str(status or "").strip().lower()
+        if status_token:
+            query.append("WHERE status=?")
+            params.append(status_token)
+        query.append("ORDER BY last_seen_at DESC, updated_at DESC LIMIT ?")
+        params.append(max(1, int(limit or 25)))
+        with self._conn() as conn:
+            rows = conn.execute("\n".join(query), tuple(params)).fetchall()
+        candidates = [self._row_to_discovery_candidate(row) for row in rows]
+        return {"peer_id": self.node_id, "count": len(candidates), "candidates": candidates}
+
+    def _seek_candidate_urls(
+        self,
+        *,
+        base_urls: Optional[list[str]] = None,
+        hosts: Optional[list[str]] = None,
+        cidr: str = "",
+        port: int = 8421,
+        include_self: bool = False,
+        limit: int = 32,
+    ) -> list[str]:
+        seen: list[str] = []
+        max_count = max(1, int(limit or 32))
+
+        def append_url(raw_value: str) -> None:
+            token = str(raw_value or "").strip()
+            if not token:
+                return
+            if "://" not in token:
+                token = f"http://{token}"
+            token = token.rstrip("/")
+            if not include_self and token == self.base_url.rstrip("/"):
+                return
+            if token not in seen and len(seen) < max_count:
+                seen.append(token)
+
+        for item in (base_urls or []):
+            append_url(str(item or ""))
+        for item in (hosts or []):
+            host_token = str(item or "").strip()
+            if not host_token:
+                continue
+            if "://" in host_token:
+                append_url(host_token)
+            else:
+                append_url(f"http://{host_token}:{int(port or 8421)}")
+        cidr_token = str(cidr or "").strip()
+        if cidr_token and len(seen) < max_count:
+            network = ipaddress.ip_network(cidr_token, strict=False)
+            for host in network.hosts():
+                append_url(f"http://{host}:{int(port or 8421)}")
+                if len(seen) >= max_count:
+                    break
+        return seen
+
+    def seek_peers(
+        self,
+        *,
+        base_urls: Optional[list[str]] = None,
+        hosts: Optional[list[str]] = None,
+        cidr: str = "",
+        port: int = 8421,
+        trust_tier: str = "trusted",
+        auto_connect: bool = False,
+        include_self: bool = False,
+        limit: int = 32,
+        timeout: float = 2.0,
+        refresh_known: bool = True,
+    ) -> dict:
+        urls = self._seek_candidate_urls(
+            base_urls=base_urls,
+            hosts=hosts,
+            cidr=cidr,
+            port=port,
+            include_self=include_self,
+            limit=limit,
+        )
+        results = []
+        connected = 0
+        discovered = 0
+        errors = 0
+        for base_url in urls:
+            try:
+                client = MeshPeerClient(base_url, timeout=float(timeout or 2.0))
+                manifest = client.manifest()
+                remote_card = dict(manifest.get("organism_card") or {})
+                peer_id = str(remote_card.get("organism_id") or remote_card.get("node_id") or "").strip()
+                candidate = self._remember_discovery_candidate(
+                    base_url=base_url,
+                    peer_id=peer_id,
+                    display_name=remote_card.get("display_name") or peer_id,
+                    endpoint_url=remote_card.get("endpoint_url") or base_url,
+                    status="discovered",
+                    trust_tier=trust_tier,
+                    device_profile=manifest.get("device_profile") or remote_card.get("device_profile") or {},
+                    manifest=manifest,
+                    metadata={
+                        "supported_features": list((remote_card.get("supported_features") or [])),
+                        "candidate_kind": "seek",
+                    },
+                )
+                result: dict[str, Any] = {
+                    "base_url": base_url,
+                    "peer_id": peer_id,
+                    "display_name": candidate.get("display_name") or peer_id,
+                    "status": "discovered",
+                    "candidate": candidate,
+                }
+                discovered += 1
+                if peer_id == self.node_id:
+                    result["status"] = "self"
+                elif auto_connect:
+                    if self._get_peer_row(peer_id) is None:
+                        connection = self.connect_peer(base_url=base_url, trust_tier=trust_tier, timeout=float(timeout or 2.0))
+                    elif refresh_known:
+                        connection = self.sync_peer(peer_id, client=client, refresh_manifest=True)
+                    else:
+                        connection = {"status": "known"}
+                    connected += 1 if result["status"] != "self" else 0
+                    result["status"] = "connected"
+                    result["connection"] = connection
+                    result["candidate"] = self._remember_discovery_candidate(
+                        base_url=base_url,
+                        peer_id=peer_id,
+                        display_name=remote_card.get("display_name") or peer_id,
+                        endpoint_url=remote_card.get("endpoint_url") or base_url,
+                        status="connected",
+                        trust_tier=trust_tier,
+                        device_profile=manifest.get("device_profile") or remote_card.get("device_profile") or {},
+                        manifest=manifest,
+                        metadata={"auto_connect": True},
+                    )
+                results.append(result)
+            except Exception as exc:
+                errors += 1
+                candidate = self._remember_discovery_candidate(
+                    base_url=base_url,
+                    status="error",
+                    trust_tier=trust_tier,
+                    metadata={"candidate_kind": "seek"},
+                    last_error=str(exc),
+                )
+                results.append({"base_url": base_url, "status": "error", "error": str(exc), "candidate": candidate})
+        self._record_event(
+            "mesh.discovery.seek",
+            peer_id=self.node_id,
+            payload={
+                "candidate_count": len(urls),
+                "discovered": discovered,
+                "connected": connected,
+                "errors": errors,
+                "auto_connect": bool(auto_connect),
+            },
+        )
+        return {
+            "peer_id": self.node_id,
+            "count": len(results),
+            "discovered": discovered,
+            "connected": connected,
+            "errors": errors,
+            "results": results,
+        }
+
+    def list_execution_targets(
+        self,
+        job: dict,
+        *,
+        preferred_peer_id: str = "",
+        allow_local: bool = True,
+        allow_remote: bool = True,
+    ) -> dict:
+        normalized_job = dict(job or {})
+        targets = []
+        if allow_local:
+            score, reasons = self._local_candidate_score(normalized_job)
+            targets.append(
+                {
+                    "target_type": "local",
+                    "peer_id": self.node_id,
+                    "score": score,
+                    "eligible": score > -10000,
+                    "reasons": reasons,
+                    "device_profile": dict(self.device_profile),
+                    "queue_metrics": self.queue_metrics(),
+                }
+            )
+        if allow_remote:
+            for peer in self.list_peers(limit=500).get("peers", []):
+                score, reasons = self._peer_candidate_score(peer, normalized_job)
+                if preferred_peer_id and peer["peer_id"] == preferred_peer_id:
+                    score += 500
+                    reasons = list(reasons) + ["preferred_peer"]
+                targets.append(
+                    {
+                        "target_type": "peer",
+                        "peer_id": peer["peer_id"],
+                        "score": score,
+                        "eligible": score > -10000,
+                        "reasons": reasons,
+                        "device_profile": dict(peer.get("device_profile") or {}),
+                        "queue_metrics": dict((peer.get("metadata") or {}).get("remote_queue_metrics") or {}),
+                    }
+                )
+        targets.sort(key=lambda item: (item["score"], item["target_type"] == "local"), reverse=True)
+        return {
+            "status": "ok",
+            "count": len(targets),
+            "targets": targets,
+            "eligible": [target for target in targets if target.get("eligible")],
+        }
+
+    def _merge_cooperative_child_job(self, base_job: dict, shard: dict, *, group_id: str, shard_index: int, shard_count: int) -> dict:
+        merged = dict(base_job or {})
+        shard_spec = dict(shard or {})
+        merged_payload = dict(base_job.get("payload") or {})
+        merged_payload.update(dict(shard_spec.get("payload") or {}))
+        merged["payload"] = merged_payload
+        merged_requirements = dict(base_job.get("requirements") or {})
+        merged_requirements.update(dict(shard_spec.get("requirements") or {}))
+        merged["requirements"] = merged_requirements
+        merged_policy = dict(base_job.get("policy") or {})
+        merged_policy.update(dict(shard_spec.get("policy") or {}))
+        merged["policy"] = merged_policy
+        merged_metadata = dict(base_job.get("metadata") or {})
+        merged_metadata.update(dict(shard_spec.get("metadata") or {}))
+        merged_metadata["cooperative_task"] = {
+            "task_id": group_id,
+            "shard_index": shard_index,
+            "shard_count": shard_count,
+            "label": str(shard_spec.get("label") or f"shard-{shard_index + 1}"),
+        }
+        merged["metadata"] = merged_metadata
+        merged["artifact_inputs"] = list(base_job.get("artifact_inputs") or []) + list(shard_spec.get("artifact_inputs") or [])
+        for key in ("kind", "dispatch_mode"):
+            if key in shard_spec:
+                merged[key] = shard_spec[key]
+        return merged
+
+    def _resolve_cooperative_child_job(self, child: dict) -> dict:
+        child_spec = dict(child or {})
+        peer_id = str(child_spec.get("peer_id") or self.node_id).strip() or self.node_id
+        job_id = str(child_spec.get("job_id") or "").strip()
+        snapshot = dict(child_spec.get("job_snapshot") or {})
+        if not job_id:
+            return snapshot
+        try:
+            if peer_id == self.node_id:
+                job = self.get_job(job_id)
+            else:
+                remote_client, _ = self._resolve_peer_client(peer_id)
+                job = remote_client.get_job(job_id)
+            return job
+        except Exception as exc:
+            stale = dict(snapshot)
+            stale["resolution_error"] = str(exc)
+            return stale
+
+    def _cooperative_task_state(self, child_jobs: list[dict]) -> dict:
+        counts: dict[str, int] = {}
+        for child_job in child_jobs:
+            status = str((child_job or {}).get("status") or "unknown").strip().lower() or "unknown"
+            counts[status] = counts.get(status, 0) + 1
+        total = len(child_jobs)
+        active = counts.get("queued", 0) + counts.get("retry_wait", 0) + counts.get("running", 0) + counts.get("resuming", 0)
+        if total > 0 and counts.get("completed", 0) == total:
+            state = "completed"
+        elif active > 0:
+            state = "active"
+        elif counts.get("checkpointed", 0) > 0:
+            state = "checkpointed"
+        elif counts.get("failed", 0) > 0 or counts.get("rejected", 0) > 0:
+            state = "attention"
+        elif counts.get("cancelled", 0) == total and total > 0:
+            state = "cancelled"
+        else:
+            state = "pending"
+        return {"state": state, "counts": counts, "total": total}
+
+    def _cooperative_target_profiles(self, target_peer_ids: list[str], strategy: str) -> dict:
+        """Materialise device/compute profiles + enlistment state for shard placement."""
+        profiles: dict[str, dict] = {}
+        peers_index: dict[str, dict] = {}
+        for peer in self.list_peers(limit=500).get("peers", []):
+            peer_id = peer.get("peer_id") or ""
+            if peer_id:
+                peers_index[peer_id] = peer
+        for peer_id in target_peer_ids:
+            if peer_id == self.node_id:
+                compute_profile = dict(self.device_profile.get("compute_profile") or {})
+                profiles[peer_id] = {
+                    "peer_id": peer_id,
+                    "is_local": True,
+                    "device_profile": dict(self.device_profile),
+                    "compute_profile": compute_profile,
+                    "enlistment": {"state": "self", "role": "controller", "mode": "local"},
+                    "load": {"queue_depth": self._local_queue_depth(), "pressure": self.queue_metrics().get("pressure", "idle")},
+                }
+                continue
+            peer = peers_index.get(peer_id)
+            if peer is None:
+                profiles[peer_id] = {
+                    "peer_id": peer_id,
+                    "is_local": False,
+                    "device_profile": {},
+                    "compute_profile": {},
+                    "enlistment": {"state": "unknown"},
+                    "load": {"queue_depth": 0, "pressure": "unknown"},
+                }
+                continue
+            device_profile = dict(peer.get("device_profile") or {})
+            compute_profile = dict(device_profile.get("compute_profile") or {})
+            enlistment = dict((peer.get("metadata") or {}).get("enlistment") or {})
+            profiles[peer_id] = {
+                "peer_id": peer_id,
+                "is_local": False,
+                "device_profile": device_profile,
+                "compute_profile": compute_profile,
+                "enlistment": enlistment,
+                "load": self._peer_load_summary(peer),
+            }
+        return profiles
+
+    def _shard_workload_requirements(self, base_job: dict, shard: dict) -> dict:
+        """Compute effective GPU/cpu/memory requirements for a shard."""
+        base_placement = self._normalized_placement(base_job)
+        shard_placement_raw = dict((shard or {}).get("placement") or {})
+        shard_requirements_raw = dict((shard or {}).get("requirements") or {})
+        # Normalize shard placement by re-applying logic via synthetic job
+        synthetic = {
+            "placement": {**dict(base_job.get("placement") or {}), **shard_placement_raw},
+            "requirements": {**dict(base_job.get("requirements") or {}), **shard_requirements_raw},
+            "metadata": dict((shard or {}).get("metadata") or base_job.get("metadata") or {}),
+        }
+        shard_placement = self._normalized_placement(synthetic)
+        workload_class = shard_placement.get("workload_class") or base_placement.get("workload_class") or "default"
+        gpu_required = bool(shard_placement.get("gpu_required") or base_placement.get("gpu_required"))
+        min_gpu_vram_mb = int(shard_placement.get("min_gpu_vram_mb") or base_placement.get("min_gpu_vram_mb") or 0)
+        min_memory_mb = int(shard_placement.get("min_memory_mb") or base_placement.get("min_memory_mb") or 0)
+        min_cpu_cores = float(shard_placement.get("min_cpu_cores") or base_placement.get("min_cpu_cores") or 0)
+        gpu_class_preferred = shard_placement.get("gpu_class_preferred") or base_placement.get("gpu_class_preferred") or ""
+        return {
+            "workload_class": workload_class,
+            "gpu_required": gpu_required,
+            "min_gpu_vram_mb": min_gpu_vram_mb,
+            "min_memory_mb": min_memory_mb,
+            "min_cpu_cores": min_cpu_cores,
+            "gpu_class_preferred": gpu_class_preferred,
+            "placement": shard_placement,
+        }
+
+    def _peer_meets_shard(self, profile: dict, shard_needs: dict) -> tuple[bool, list[str]]:
+        reasons: list[str] = []
+        compute = dict(profile.get("compute_profile") or {})
+        device_profile = dict(profile.get("device_profile") or {})
+        if shard_needs.get("gpu_required") and not compute.get("gpu_capable"):
+            return False, ["gpu_required_not_available"]
+        if shard_needs.get("min_gpu_vram_mb") and compute.get("gpu_capable"):
+            if int(compute.get("gpu_vram_mb") or 0) < int(shard_needs.get("min_gpu_vram_mb") or 0):
+                return False, ["gpu_vram_insufficient"]
+        if shard_needs.get("min_memory_mb"):
+            if int(compute.get("memory_mb") or 0) < int(shard_needs.get("min_memory_mb") or 0):
+                return False, ["memory_insufficient"]
+        if shard_needs.get("min_cpu_cores"):
+            if float(compute.get("cpu_cores") or 0) < float(shard_needs.get("min_cpu_cores") or 0):
+                return False, ["cpu_insufficient"]
+        helper_state = str(device_profile.get("helper_state") or "active").strip().lower()
+        if helper_state == "retired" and not profile.get("is_local"):
+            return False, ["helper_retired"]
+        if helper_state == "draining":
+            reasons.append("helper_draining")
+        enlistment = dict(profile.get("enlistment") or {})
+        if enlistment.get("state") == "enlisted":
+            reasons.append("enlisted")
+        if compute.get("gpu_capable"):
+            reasons.append("gpu_capable")
+        return True, reasons
+
+    def _select_cooperative_shard_target(
+        self,
+        *,
+        base_job: dict,
+        shard: dict,
+        normalized_targets: list[str],
+        peer_profiles: dict,
+        used_assignments: dict,
+        strategy: str,
+        shard_index: int,
+    ) -> str:
+        needs = self._shard_workload_requirements(base_job, shard)
+        candidates: list[tuple[int, str, list[str]]] = []
+        for peer_id in normalized_targets:
+            profile = peer_profiles.get(peer_id) or {}
+            eligible, tags = self._peer_meets_shard(profile, needs)
+            if not eligible:
+                continue
+            load_depth = int((profile.get("load") or {}).get("queue_depth") or 0)
+            base_score = 1000 - used_assignments.get(peer_id, 0) * 60 - load_depth * 15
+            compute = dict(profile.get("compute_profile") or {})
+            if needs.get("gpu_required") and compute.get("gpu_capable"):
+                base_score += 220
+                if (
+                    needs.get("gpu_class_preferred")
+                    and compute.get("gpu_class") == needs.get("gpu_class_preferred")
+                ):
+                    base_score += 80
+            if needs.get("workload_class") in {"gpu_training", "gpu_inference", "mixed"} and compute.get("gpu_capable"):
+                base_score += 120
+            if needs.get("workload_class") == "cpu_bound" and not compute.get("gpu_capable"):
+                base_score += 60
+            if "enlisted" in tags:
+                base_score += 140
+            if "helper_draining" in tags:
+                base_score -= 250
+            if profile.get("is_local") and strategy == "remote-only":
+                continue
+            candidates.append((base_score, peer_id, tags))
+        if candidates:
+            candidates.sort(key=lambda item: item[0], reverse=True)
+            return candidates[0][1]
+        # Fallback: round-robin if nothing matched
+        return normalized_targets[shard_index % len(normalized_targets)]
+
+    def _shard_placement_summary(
+        self,
+        *,
+        base_job: dict,
+        shard: dict,
+        target_peer_id: str,
+        peer_profiles: dict,
+    ) -> dict:
+        needs = self._shard_workload_requirements(base_job, shard)
+        profile = peer_profiles.get(target_peer_id) or {}
+        compute = dict(profile.get("compute_profile") or {})
+        return {
+            "workload_class": needs.get("workload_class"),
+            "gpu_required": bool(needs.get("gpu_required")),
+            "min_gpu_vram_mb": int(needs.get("min_gpu_vram_mb") or 0),
+            "min_memory_mb": int(needs.get("min_memory_mb") or 0),
+            "min_cpu_cores": float(needs.get("min_cpu_cores") or 0),
+            "target_gpu_capable": bool(compute.get("gpu_capable")),
+            "target_gpu_class": compute.get("gpu_class") or "",
+            "target_gpu_vram_mb": int(compute.get("gpu_vram_mb") or 0),
+            "target_cpu_cores": int(compute.get("cpu_cores") or 0),
+            "target_memory_mb": int(compute.get("memory_mb") or 0),
+            "target_enlistment_state": str((profile.get("enlistment") or {}).get("state") or ""),
+            "target_is_local": bool(profile.get("is_local")),
+        }
+
+    def launch_cooperative_task(
+        self,
+        *,
+        base_job: dict,
+        shards: list[dict],
+        name: str = "",
+        request_id: Optional[str] = None,
+        strategy: str = "spread",
+        allow_local: bool = True,
+        allow_remote: bool = True,
+        target_peer_ids: Optional[list[str]] = None,
+        auto_enlist: bool = False,
+    ) -> dict:
+        base_job = dict(base_job or {})
+        shard_specs = [dict(item or {}) for item in (shards or [])]
+        if not base_job:
+            raise MeshPolicyError("base_job is required")
+        if not shard_specs:
+            raise MeshPolicyError("at least one shard is required")
+        task_request_id = str(request_id or uuid.uuid4().hex).strip()
+        with self._conn() as conn:
+            existing = conn.execute(
+                "SELECT * FROM mesh_cooperative_tasks WHERE request_id=?",
+                (task_request_id,),
+            ).fetchone()
+        if existing is not None:
+            task = self.get_cooperative_task(existing["id"])
+            task["deduped"] = True
+            return task
+        strategy_token = str(strategy or "spread").strip().lower() or "spread"
+        if strategy_token not in {"spread", "local-only", "remote-only", "gpu-aware"}:
+            strategy_token = "spread"
+        targets_input = [str(item or "").strip() for item in (target_peer_ids or []) if str(item or "").strip()]
+        # Optionally auto-enlist helpers before placement
+        auto_enlist_result: Optional[dict] = None
+        if auto_enlist and strategy_token != "local-only":
+            try:
+                auto_enlist_result = self.auto_seek_help(job=base_job, max_enlist=3, reason="cooperative_launch")
+            except Exception as exc:
+                auto_enlist_result = {"error": str(exc)}
+        if not targets_input:
+            eligible_targets = self.list_execution_targets(
+                base_job,
+                allow_local=allow_local if strategy_token != "remote-only" else False,
+                allow_remote=allow_remote if strategy_token != "local-only" else False,
+            ).get("eligible", [])
+            if strategy_token == "spread":
+                targets_input = [target["peer_id"] for target in eligible_targets]
+            elif strategy_token == "local-only":
+                targets_input = [self.node_id]
+            elif strategy_token == "gpu-aware":
+                targets_input = [target["peer_id"] for target in eligible_targets]
+            else:
+                targets_input = [target["peer_id"] for target in eligible_targets if target.get("target_type") == "peer"]
+        normalized_targets: list[str] = []
+        for peer_id in targets_input:
+            peer_token = str(peer_id or "").strip()
+            if peer_token and peer_token not in normalized_targets:
+                normalized_targets.append(peer_token)
+        if not normalized_targets:
+            raise MeshPolicyError("no eligible cooperative task target found")
+        task_id = str(uuid.uuid4())
+        # Cache known targets' capability/profile info for per-shard GPU-aware placement
+        peer_profiles = self._cooperative_target_profiles(normalized_targets, strategy_token)
+        child_specs = []
+        used_assignments: dict[str, int] = {peer_id: 0 for peer_id in normalized_targets}
+        for index, shard in enumerate(shard_specs):
+            explicit_target = str(shard.get("target_peer_id") or "").strip()
+            if explicit_target:
+                target_peer_id = explicit_target
+            else:
+                target_peer_id = self._select_cooperative_shard_target(
+                    base_job=base_job,
+                    shard=shard,
+                    normalized_targets=normalized_targets,
+                    peer_profiles=peer_profiles,
+                    used_assignments=used_assignments,
+                    strategy=strategy_token,
+                    shard_index=index,
+                )
+            used_assignments[target_peer_id] = used_assignments.get(target_peer_id, 0) + 1
+            child_job = self._merge_cooperative_child_job(base_job, shard, group_id=task_id, shard_index=index, shard_count=len(shard_specs))
+            child_request_id = f"{task_request_id}:shard:{index + 1}"
+            if target_peer_id == self.node_id:
+                response = self.submit_local_job({**child_job, "target": self.node_id}, request_id=child_request_id)
+            else:
+                response = self.dispatch_job_to_peer(target_peer_id, {**child_job, "target": target_peer_id}, request_id=child_request_id)
+            shard_placement_summary = self._shard_placement_summary(
+                base_job=base_job,
+                shard=shard,
+                target_peer_id=target_peer_id,
+                peer_profiles=peer_profiles,
+            )
+            child_specs.append(
+                {
+                    "shard_index": index,
+                    "label": str(shard.get("label") or f"shard-{index + 1}"),
+                    "peer_id": target_peer_id,
+                    "job_id": ((response.get("job") or {}).get("id") or "").strip(),
+                    "request_id": child_request_id,
+                    "job_snapshot": dict(response.get("job") or {}),
+                    "placement": shard_placement_summary,
+                }
+            )
+        now = _utcnow()
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO mesh_cooperative_tasks
+                (id, request_id, name, strategy, base_job, shard_count, shard_jobs, target_peers, metadata, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    task_id,
+                    task_request_id,
+                    str(name or "").strip(),
+                    strategy_token,
+                    json.dumps(base_job),
+                    len(shard_specs),
+                    json.dumps(child_specs),
+                    json.dumps(normalized_targets),
+                    json.dumps(
+                        {
+                            "allow_local": bool(allow_local),
+                            "allow_remote": bool(allow_remote),
+                            "auto_enlist": bool(auto_enlist),
+                            "auto_enlist_result": auto_enlist_result or {},
+                        }
+                    ),
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+        self._record_event(
+            "mesh.cooperative_task.launched",
+            peer_id=self.node_id,
+            request_id=task_request_id,
+            payload={
+                "task_id": task_id,
+                "strategy": strategy_token,
+                "shard_count": len(shard_specs),
+                "target_peers": normalized_targets,
+            },
+        )
+        return self.get_cooperative_task(task_id)
+
+    def get_cooperative_task(self, task_id: str) -> dict:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM mesh_cooperative_tasks WHERE id=?",
+                ((task_id or "").strip(),),
+            ).fetchone()
+        if row is None:
+            raise MeshPolicyError("cooperative task not found")
+        child_specs = list(_loads_json(row["shard_jobs"], []))
+        child_jobs = []
+        for child in child_specs:
+            resolved_job = self._resolve_cooperative_child_job(child)
+            child_jobs.append({**dict(child or {}), "job": resolved_job})
+        summary = self._cooperative_task_state([child.get("job") or {} for child in child_jobs])
+        return {
+            "id": row["id"],
+            "request_id": row["request_id"] or "",
+            "name": row["name"] or "",
+            "strategy": row["strategy"] or "spread",
+            "base_job": _loads_json(row["base_job"], {}),
+            "target_peers": list(_loads_json(row["target_peers"], [])),
+            "metadata": _loads_json(row["metadata"], {}),
+            "shard_count": int(row["shard_count"] or 0),
+            "state": summary["state"],
+            "summary": summary,
+            "children": child_jobs,
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def list_cooperative_tasks(self, *, limit: int = 25, state: str = "") -> dict:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM mesh_cooperative_tasks
+                ORDER BY created_at DESC, updated_at DESC
+                LIMIT ?
+                """,
+                (max(1, int(limit or 25)),),
+            ).fetchall()
+        tasks = [self.get_cooperative_task(row["id"]) for row in rows]
+        state_token = str(state or "").strip().lower()
+        if state_token:
+            tasks = [task for task in tasks if str(task.get("state") or "").strip().lower() == state_token]
+        return {"peer_id": self.node_id, "count": len(tasks), "tasks": tasks}
+
+    # ---------------------------- mission layer ---------------------------
+
+    def _store_mission_row(
+        self,
+        *,
+        mission_id: str,
+        request_id: str,
+        title: str,
+        intent: str,
+        status: str,
+        priority: str,
+        workload_class: str,
+        origin_peer_id: str,
+        target_strategy: str,
+        policy: Optional[dict] = None,
+        continuity: Optional[dict] = None,
+        metadata: Optional[dict] = None,
+        child_job_ids: Optional[list[str]] = None,
+        cooperative_task_ids: Optional[list[str]] = None,
+        latest_checkpoint_ref: Optional[dict] = None,
+        result_ref: Optional[dict] = None,
+        result_bundle_ref: Optional[dict] = None,
+        created_at: Optional[str] = None,
+    ) -> dict:
+        now = _utcnow()
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO mesh_missions
+                (id, request_id, title, intent, status, priority, workload_class, origin_peer_id, target_strategy,
+                 policy, continuity, metadata, child_job_ids, cooperative_task_ids, latest_checkpoint_ref,
+                 result_ref, result_bundle_ref, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(request_id) DO UPDATE SET
+                    title=excluded.title,
+                    intent=excluded.intent,
+                    status=excluded.status,
+                    priority=excluded.priority,
+                    workload_class=excluded.workload_class,
+                    target_strategy=excluded.target_strategy,
+                    policy=excluded.policy,
+                    continuity=excluded.continuity,
+                    metadata=excluded.metadata,
+                    child_job_ids=excluded.child_job_ids,
+                    cooperative_task_ids=excluded.cooperative_task_ids,
+                    latest_checkpoint_ref=excluded.latest_checkpoint_ref,
+                    result_ref=excluded.result_ref,
+                    result_bundle_ref=excluded.result_bundle_ref,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    mission_id,
+                    request_id,
+                    str(title or "").strip(),
+                    str(intent or "").strip(),
+                    _normalize_mission_status(status),
+                    _normalize_mission_priority(priority),
+                    _normalize_workload_class(workload_class),
+                    str(origin_peer_id or self.node_id).strip() or self.node_id,
+                    _normalize_target_strategy(target_strategy),
+                    json.dumps(_normalize_mission_policy(policy or {})),
+                    json.dumps(_normalize_mission_continuity(continuity or {})),
+                    json.dumps(dict(metadata or {})),
+                    json.dumps(_unique_tokens(child_job_ids or [])),
+                    json.dumps(_unique_tokens(cooperative_task_ids or [])),
+                    json.dumps(dict(latest_checkpoint_ref or {})),
+                    json.dumps(dict(result_ref or {})),
+                    json.dumps(dict(result_bundle_ref or {})),
+                    created_at or now,
+                    now,
+                ),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM mesh_missions WHERE request_id=?", ((request_id or "").strip(),)).fetchone()
+        return self._row_to_mission(row)
+
+    def _existing_mission_by_request(self, request_id: str) -> Optional[dict]:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM mesh_missions WHERE request_id=?", ((request_id or "").strip(),)).fetchone()
+        return self._row_to_mission(row) if row is not None else None
+
+    def _mission_status_from_children(self, child_jobs: list[dict], cooperative_tasks: list[dict], metadata: dict) -> str:
+        statuses = [str((job or {}).get("status") or "").strip().lower() for job in child_jobs if job]
+        task_states = [str((task or {}).get("state") or "").strip().lower() for task in cooperative_tasks if task]
+        if not statuses and not task_states:
+            return "failed" if str(metadata.get("launch_error") or "").strip() else "planned"
+        if statuses and all(status == "completed" for status in statuses):
+            return "completed"
+        if statuses and all(status == "cancelled" for status in statuses):
+            return "cancelled"
+        if any(status in {"running", "resuming"} for status in statuses):
+            return "active"
+        if any(status in {"accepted", "queued", "retry_wait"} for status in statuses) or "pending" in task_states:
+            return "waiting"
+        if "active" in task_states:
+            return "active"
+        if any(status == "checkpointed" for status in statuses) or "checkpointed" in task_states:
+            return "checkpointed"
+        if any(status in {"failed", "rejected"} for status in statuses) or "attention" in task_states:
+            return "failed"
+        if any(status == "cancelled" for status in statuses):
+            return "cancelled"
+        return "planned"
+
+    def _mission_runtime_summary(
+        self,
+        *,
+        mission: dict,
+        child_jobs: list[dict],
+        cooperative_tasks: list[dict],
+    ) -> tuple[dict, dict, dict, dict, dict]:
+        status_counts: dict[str, int] = {}
+        task_state_counts: dict[str, int] = {}
+        latest_checkpoint_ref: dict[str, Any] = {}
+        latest_checkpoint_at = ""
+        result_ref: dict[str, Any] = {}
+        result_bundle_ref: dict[str, Any] = {}
+        latest_result_at = ""
+        recovery_hints: list[str] = []
+        resume_count = 0
+        last_child_update = str(mission.get("updated_at") or "")
+        lineage_jobs: list[dict[str, Any]] = []
+        lineage_tasks: list[dict[str, Any]] = []
+
+        for child in child_jobs:
+            status = str((child or {}).get("status") or "unknown").strip().lower() or "unknown"
+            status_counts[status] = status_counts.get(status, 0) + 1
+            updated_at = str((child or {}).get("updated_at") or "")
+            if updated_at and updated_at > last_child_update:
+                last_child_update = updated_at
+            checkpoint_ref = dict((child or {}).get("latest_checkpoint_ref") or {})
+            checkpointed_at = str((child or {}).get("checkpointed_at") or updated_at or "")
+            if checkpoint_ref and checkpointed_at >= latest_checkpoint_at:
+                latest_checkpoint_at = checkpointed_at
+                latest_checkpoint_ref = checkpoint_ref
+            child_result_ref = dict((child or {}).get("result_ref") or {})
+            child_bundle_ref = dict((child or {}).get("result_bundle_ref") or {})
+            if (child_result_ref or child_bundle_ref) and updated_at >= latest_result_at:
+                latest_result_at = updated_at
+                if child_result_ref:
+                    result_ref = child_result_ref
+                if child_bundle_ref:
+                    result_bundle_ref = child_bundle_ref
+            resume_count += int((child or {}).get("resume_count") or 0)
+            recovery_hint = str(((child or {}).get("recovery") or {}).get("recovery_hint") or "").strip()
+            if recovery_hint and recovery_hint not in recovery_hints:
+                recovery_hints.append(recovery_hint)
+            lineage_jobs.append(
+                {
+                    "id": str((child or {}).get("id") or ""),
+                    "status": status,
+                    "updated_at": updated_at,
+                    "checkpoint_ref": checkpoint_ref,
+                    "result_ref": child_result_ref,
+                    "result_bundle_ref": child_bundle_ref,
+                }
+            )
+
+        for task in cooperative_tasks:
+            state = str((task or {}).get("state") or "pending").strip().lower() or "pending"
+            task_state_counts[state] = task_state_counts.get(state, 0) + 1
+            updated_at = str((task or {}).get("updated_at") or "")
+            if updated_at and updated_at > last_child_update:
+                last_child_update = updated_at
+            lineage_tasks.append(
+                {
+                    "id": str((task or {}).get("id") or ""),
+                    "state": state,
+                    "updated_at": updated_at,
+                    "shard_count": int((task or {}).get("shard_count") or 0),
+                }
+            )
+
+        stored_continuity = dict(mission.get("continuity") or {})
+        continuity = {
+            **stored_continuity,
+            "resumable": bool(stored_continuity.get("resumable")) or any(
+                bool(((child or {}).get("recovery") or {}).get("resumable")) for child in child_jobs
+            ),
+            "checkpoint_ready": bool(latest_checkpoint_ref),
+            "latest_checkpoint_ref": latest_checkpoint_ref,
+            "resume_count": resume_count,
+            "recovery_hints": recovery_hints[:4],
+            "child_status_counts": status_counts,
+            "task_state_counts": task_state_counts,
+            "last_child_update_at": last_child_update,
+        }
+        summary = {
+            "job_count": len(child_jobs),
+            "cooperative_task_count": len(cooperative_tasks),
+            "child_status_counts": status_counts,
+            "task_state_counts": task_state_counts,
+        }
+        lineage = {
+            "jobs": lineage_jobs,
+            "cooperative_tasks": lineage_tasks,
+            "latest_checkpoint_ref": latest_checkpoint_ref,
+            "result_ref": result_ref,
+            "result_bundle_ref": result_bundle_ref,
+        }
+        return continuity, summary, latest_checkpoint_ref, {"result_ref": result_ref, "result_bundle_ref": result_bundle_ref}, lineage
+
+    def _refresh_mission_runtime(self, mission: dict) -> dict:
+        mission_data = dict(mission or {})
+        child_job_ids = _unique_tokens(mission_data.get("child_job_ids") or [])
+        cooperative_task_ids = _unique_tokens(mission_data.get("cooperative_task_ids") or [])
+        cooperative_tasks: list[dict] = []
+        for task_id in cooperative_task_ids:
+            try:
+                cooperative_tasks.append(self.get_cooperative_task(task_id))
+            except Exception as exc:
+                cooperative_tasks.append({"id": task_id, "state": "failed", "error": str(exc), "children": []})
+        for task in cooperative_tasks:
+            for child in list(task.get("children") or []):
+                job_id = str(child.get("job_id") or ((child.get("job") or {}).get("id")) or "").strip()
+                if job_id and job_id not in child_job_ids:
+                    child_job_ids.append(job_id)
+        child_jobs: list[dict] = []
+        for job_id in child_job_ids:
+            try:
+                child_jobs.append(self.get_job(job_id))
+            except Exception as exc:
+                child_jobs.append({"id": job_id, "status": "failed", "resolution_error": str(exc), "updated_at": _utcnow()})
+        continuity, summary, latest_checkpoint_ref, result_refs, lineage = self._mission_runtime_summary(
+            mission=mission_data,
+            child_jobs=child_jobs,
+            cooperative_tasks=cooperative_tasks,
+        )
+        metadata = dict(mission_data.get("metadata") or {})
+        status = self._mission_status_from_children(child_jobs, cooperative_tasks, metadata)
+        if any(key in metadata for key in ("launch_error", "last_control_error")) and not child_job_ids and not cooperative_task_ids:
+            status = "failed"
+        refreshed = mission_data | {
+            "status": status,
+            "continuity": continuity,
+            "summary": summary,
+            "latest_checkpoint_ref": latest_checkpoint_ref,
+            "result_ref": dict(result_refs.get("result_ref") or {}),
+            "result_bundle_ref": dict(result_refs.get("result_bundle_ref") or {}),
+            "child_job_ids": child_job_ids,
+            "cooperative_task_ids": cooperative_task_ids,
+            "child_jobs": child_jobs,
+            "cooperative_tasks": cooperative_tasks,
+            "lineage": lineage,
+        }
+        stored_changed = (
+            _normalize_mission_status(mission_data.get("status")) != status
+            or dict(mission_data.get("continuity") or {}) != continuity
+            or dict(mission_data.get("latest_checkpoint_ref") or {}) != latest_checkpoint_ref
+            or dict(mission_data.get("result_ref") or {}) != refreshed["result_ref"]
+            or dict(mission_data.get("result_bundle_ref") or {}) != refreshed["result_bundle_ref"]
+            or _unique_tokens(mission_data.get("child_job_ids") or []) != child_job_ids
+        )
+        if stored_changed:
+            refreshed = self._store_mission_row(
+                mission_id=mission_data["id"],
+                request_id=mission_data["request_id"],
+                title=mission_data.get("title") or "",
+                intent=mission_data.get("intent") or "",
+                status=status,
+                priority=mission_data.get("priority") or "normal",
+                workload_class=mission_data.get("workload_class") or "default",
+                origin_peer_id=mission_data.get("origin_peer_id") or self.node_id,
+                target_strategy=mission_data.get("target_strategy") or "local",
+                policy=mission_data.get("policy") or {},
+                continuity=continuity,
+                metadata=metadata,
+                child_job_ids=child_job_ids,
+                cooperative_task_ids=cooperative_task_ids,
+                latest_checkpoint_ref=latest_checkpoint_ref,
+                result_ref=refreshed["result_ref"],
+                result_bundle_ref=refreshed["result_bundle_ref"],
+                created_at=mission_data.get("created_at") or None,
+            )
+            refreshed = refreshed | {
+                "summary": summary,
+                "child_jobs": child_jobs,
+                "cooperative_tasks": cooperative_tasks,
+                "lineage": lineage,
+            }
+        return refreshed
+
+    def launch_mission(
+        self,
+        *,
+        title: str = "",
+        intent: str = "",
+        request_id: Optional[str] = None,
+        priority: str = "normal",
+        workload_class: str = "",
+        target_strategy: str = "",
+        policy: Optional[dict] = None,
+        continuity: Optional[dict] = None,
+        metadata: Optional[dict] = None,
+        job: Optional[dict] = None,
+        cooperative_task: Optional[dict] = None,
+    ) -> dict:
+        job_spec = dict(job or {})
+        task_spec = dict(cooperative_task or {})
+        if bool(job_spec) == bool(task_spec):
+            raise MeshPolicyError("mission launch requires exactly one of job or cooperative_task")
+        mission_request_id = str(request_id or uuid.uuid4().hex).strip()
+        existing = self._existing_mission_by_request(mission_request_id)
+        if existing is not None:
+            mission = self.get_mission(existing["id"])
+            mission["deduped"] = True
+            return mission
+        launch_type = "cooperative_task" if task_spec else "job"
+        title_token = str(title or task_spec.get("name") or job_spec.get("kind") or "mission").strip() or "mission"
+        intent_token = str(intent or f"Launch {launch_type.replace('_', ' ')}").strip()
+        inferred_workload = workload_class
+        if not inferred_workload:
+            if task_spec:
+                inferred_workload = (
+                    dict(task_spec.get("base_job") or {}).get("metadata") or {}
+                ).get("workload_class") or ""
+            else:
+                inferred_workload = (job_spec.get("metadata") or {}).get("workload_class") or ""
+        target_strategy_token = _normalize_target_strategy(
+            target_strategy
+            or (f"cooperative_{str(task_spec.get('strategy') or 'spread')}" if task_spec else "local")
+        )
+        mission_metadata = dict(metadata or {})
+        mission_metadata["launch"] = {"type": launch_type}
+        created = self._store_mission_row(
+            mission_id=str(uuid.uuid4()),
+            request_id=mission_request_id,
+            title=title_token,
+            intent=intent_token,
+            status="planned",
+            priority=priority,
+            workload_class=inferred_workload or "default",
+            origin_peer_id=self.node_id,
+            target_strategy=target_strategy_token,
+            policy=policy or {},
+            continuity=continuity or {},
+            metadata=mission_metadata,
+        )
+        try:
+            mission_context = {
+                "mission_id": created["id"],
+                "title": title_token,
+                "intent": intent_token,
+                "target_strategy": target_strategy_token,
+            }
+            child_job_ids: list[str] = []
+            cooperative_task_ids: list[str] = []
+            updated_metadata = dict(mission_metadata)
+            if job_spec:
+                launch_job = dict(job_spec)
+                launch_job_metadata = dict(launch_job.get("metadata") or {})
+                launch_job_metadata["mission"] = mission_context
+                launch_job["metadata"] = launch_job_metadata
+                response = self.submit_local_job(
+                    {**launch_job, "target": self.node_id},
+                    request_id=f"{mission_request_id}:job",
+                )
+                child_job_id = str(((response.get("job") or {}).get("id")) or "").strip()
+                if child_job_id:
+                    child_job_ids.append(child_job_id)
+                updated_metadata["launch"]["job_request_id"] = f"{mission_request_id}:job"
+                updated_metadata["launch"]["job_kind"] = launch_job.get("kind") or ""
+            else:
+                launch_task = dict(task_spec)
+                base_job = dict(launch_task.get("base_job") or {})
+                base_job_metadata = dict(base_job.get("metadata") or {})
+                base_job_metadata["mission"] = mission_context
+                base_job["metadata"] = base_job_metadata
+                task = self.launch_cooperative_task(
+                    base_job=base_job,
+                    shards=list(launch_task.get("shards") or []),
+                    name=str(launch_task.get("name") or title_token),
+                    request_id=f"{mission_request_id}:coop",
+                    strategy=str(launch_task.get("strategy") or "spread"),
+                    allow_local=bool(launch_task.get("allow_local", True)),
+                    allow_remote=bool(launch_task.get("allow_remote", True)),
+                    target_peer_ids=list(launch_task.get("target_peer_ids") or []),
+                    auto_enlist=bool(launch_task.get("auto_enlist", False)),
+                )
+                cooperative_task_ids.append(task["id"])
+                child_job_ids.extend(
+                    [
+                        str(child.get("job_id") or "").strip()
+                        for child in list(task.get("children") or [])
+                        if str(child.get("job_id") or "").strip()
+                    ]
+                )
+                updated_metadata["launch"]["cooperative_request_id"] = f"{mission_request_id}:coop"
+                updated_metadata["launch"]["strategy"] = str(task.get("strategy") or launch_task.get("strategy") or "spread")
+            created = self._store_mission_row(
+                mission_id=created["id"],
+                request_id=mission_request_id,
+                title=title_token,
+                intent=intent_token,
+                status="waiting",
+                priority=priority,
+                workload_class=inferred_workload or "default",
+                origin_peer_id=self.node_id,
+                target_strategy=target_strategy_token,
+                policy=policy or {},
+                continuity=continuity or {},
+                metadata=updated_metadata,
+                child_job_ids=child_job_ids,
+                cooperative_task_ids=cooperative_task_ids,
+                created_at=created.get("created_at") or None,
+            )
+            self._record_event(
+                "mesh.mission.launched",
+                peer_id=self.node_id,
+                request_id=mission_request_id,
+                payload={
+                    "mission_id": created["id"],
+                    "launch_type": launch_type,
+                    "child_job_count": len(child_job_ids),
+                    "cooperative_task_count": len(cooperative_task_ids),
+                },
+            )
+            return self.get_mission(created["id"])
+        except Exception as exc:
+            failed_metadata = dict(mission_metadata)
+            failed_metadata["launch_error"] = str(exc)
+            self._store_mission_row(
+                mission_id=created["id"],
+                request_id=mission_request_id,
+                title=title_token,
+                intent=intent_token,
+                status="failed",
+                priority=priority,
+                workload_class=inferred_workload or "default",
+                origin_peer_id=self.node_id,
+                target_strategy=target_strategy_token,
+                policy=policy or {},
+                continuity=continuity or {},
+                metadata=failed_metadata,
+                created_at=created.get("created_at") or None,
+            )
+            raise
+
+    def get_mission(self, mission_id: str) -> dict:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM mesh_missions WHERE id=?", ((mission_id or "").strip(),)).fetchone()
+        if row is None:
+            raise MeshPolicyError("mission not found")
+        return self._refresh_mission_runtime(self._row_to_mission(row))
+
+    def list_missions(self, *, limit: int = 25, status: str = "") -> dict:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM mesh_missions
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT ?
+                """,
+                (max(1, int(limit or 25)),),
+            ).fetchall()
+        missions = [self.get_mission(row["id"]) for row in rows]
+        status_token = _normalize_mission_status(status) if str(status or "").strip() else ""
+        if status_token:
+            missions = [mission for mission in missions if mission.get("status") == status_token]
+        return {"peer_id": self.node_id, "count": len(missions), "missions": missions}
+
+    def _record_mission_control_action(self, mission: dict, *, action: str, operator_id: str = "", reason: str = "") -> dict:
+        mission_data = dict(mission or {})
+        metadata = dict(mission_data.get("metadata") or {})
+        metadata["last_control_action"] = str(action or "").strip()
+        metadata["last_control_at"] = _utcnow()
+        metadata["last_control_by"] = str(operator_id or "")
+        metadata["last_control_reason"] = str(reason or "")
+        return self._store_mission_row(
+            mission_id=mission_data["id"],
+            request_id=mission_data["request_id"],
+            title=mission_data.get("title") or "",
+            intent=mission_data.get("intent") or "",
+            status=mission_data.get("status") or "planned",
+            priority=mission_data.get("priority") or "normal",
+            workload_class=mission_data.get("workload_class") or "default",
+            origin_peer_id=mission_data.get("origin_peer_id") or self.node_id,
+            target_strategy=mission_data.get("target_strategy") or "local",
+            policy=mission_data.get("policy") or {},
+            continuity=mission_data.get("continuity") or {},
+            metadata=metadata,
+            child_job_ids=mission_data.get("child_job_ids") or [],
+            cooperative_task_ids=mission_data.get("cooperative_task_ids") or [],
+            latest_checkpoint_ref=mission_data.get("latest_checkpoint_ref") or {},
+            result_ref=mission_data.get("result_ref") or {},
+            result_bundle_ref=mission_data.get("result_bundle_ref") or {},
+            created_at=mission_data.get("created_at") or None,
+        )
+
+    def _recover_mission(
+        self,
+        mission_id: str,
+        *,
+        operator_id: str = "",
+        reason: str,
+        mode: str,
+        checkpoint_artifact_id: str = "",
+    ) -> dict:
+        mission = self.get_mission(mission_id)
+        mode_token = str(mode or "").strip().lower() or "resume_latest"
+        if mode_token not in {"resume_latest", "resume_checkpoint", "restart"}:
+            raise MeshPolicyError("unsupported mission recovery mode")
+        child_jobs = [dict(job or {}) for job in list(mission.get("child_jobs") or [])]
+        if not child_jobs:
+            raise MeshPolicyError("mission has no child jobs to recover")
+        self._record_mission_control_action(mission, action=mode_token, operator_id=operator_id, reason=reason)
+        updated_jobs = []
+        queue_messages = []
+        errors = []
+        skipped = []
+        explicit_checkpoint_id = str(checkpoint_artifact_id or "").strip()
+        if explicit_checkpoint_id and len(child_jobs) != 1:
+            raise MeshPolicyError("mission-level explicit checkpoint selection requires exactly one child job")
+        for child_job in child_jobs:
+            job_id = str(child_job.get("id") or "").strip()
+            if not job_id:
+                continue
+            try:
+                status = str(child_job.get("status") or "").strip().lower()
+                if mode_token == "restart":
+                    recovered = self.restart_job(job_id, operator_id=operator_id, reason=reason)
+                elif mode_token == "resume_checkpoint":
+                    checkpoint_id = explicit_checkpoint_id or str(
+                        dict(child_job.get("latest_checkpoint_ref") or {}).get("id") or ""
+                    ).strip()
+                    if not checkpoint_id:
+                        skipped.append({"job_id": job_id, "reason": "checkpoint_unavailable"})
+                        continue
+                    recovered = self.resume_job_from_checkpoint(
+                        job_id,
+                        checkpoint_artifact_id=checkpoint_id,
+                        operator_id=operator_id,
+                        reason=reason,
+                    )
+                else:
+                    if status not in {"checkpointed", "retry_wait", "failed"}:
+                        skipped.append({"job_id": job_id, "reason": f"status_{status or 'unknown'}"})
+                        continue
+                    recovered = self.resume_job(job_id, operator_id=operator_id, reason=reason)
+                updated_jobs.append(recovered["job"])
+                queue_messages.append(recovered["queue_message"])
+            except Exception as exc:
+                errors.append({"job_id": job_id, "error": str(exc)})
+        if not updated_jobs and errors:
+            raise MeshPolicyError(errors[0]["error"])
+        if not updated_jobs and skipped:
+            raise MeshPolicyError("mission has no recoverable child jobs for requested action")
+        updated = self.get_mission(mission_id)
+        event_type = {
+            "resume_latest": "mesh.mission.resume_requested",
+            "resume_checkpoint": "mesh.mission.resume_checkpoint_requested",
+            "restart": "mesh.mission.restart_requested",
+        }[mode_token]
+        self._record_event(
+            event_type,
+            peer_id=self.node_id,
+            request_id=updated["request_id"],
+            payload={
+                "mission_id": updated["id"],
+                "mode": mode_token,
+                "operator_id": str(operator_id or ""),
+                "reason": str(reason or ""),
+                "job_count": len(updated_jobs),
+                "error_count": len(errors),
+                "skipped_count": len(skipped),
+            },
+        )
+        return {
+            "status": updated.get("status") or ("waiting" if mode_token != "restart" else "waiting"),
+            "mission": updated,
+            "jobs": updated_jobs,
+            "queue_messages": queue_messages,
+            "errors": errors,
+            "skipped": skipped,
+        }
+
+    def resume_mission(self, mission_id: str, *, operator_id: str = "", reason: str = "mission_resume_latest") -> dict:
+        return self._recover_mission(
+            mission_id,
+            operator_id=operator_id,
+            reason=reason,
+            mode="resume_latest",
+        )
+
+    def resume_mission_from_checkpoint(
+        self,
+        mission_id: str,
+        *,
+        operator_id: str = "",
+        reason: str = "mission_resume_checkpoint",
+        checkpoint_artifact_id: str = "",
+    ) -> dict:
+        return self._recover_mission(
+            mission_id,
+            operator_id=operator_id,
+            reason=reason,
+            mode="resume_checkpoint",
+            checkpoint_artifact_id=checkpoint_artifact_id,
+        )
+
+    def cancel_mission(self, mission_id: str, *, operator_id: str = "", reason: str = "mission_cancelled") -> dict:
+        mission = self.get_mission(mission_id)
+        self._record_mission_control_action(mission, action="cancel", operator_id=operator_id, reason=reason)
+        results = []
+        errors = []
+        for job_id in _unique_tokens(mission.get("child_job_ids") or []):
+            try:
+                results.append(self.cancel_job(job_id, reason=f"{reason}:{operator_id or 'operator'}"))
+            except Exception as exc:
+                errors.append({"job_id": job_id, "error": str(exc)})
+        updated = self.get_mission(mission_id)
+        return {"status": updated.get("status") or "cancelled", "mission": updated, "jobs": results, "errors": errors}
+
+    def restart_mission(self, mission_id: str, *, operator_id: str = "", reason: str = "mission_restart") -> dict:
+        return self._recover_mission(
+            mission_id,
+            operator_id=operator_id,
+            reason=reason,
+            mode="restart",
+        )
+
+    # --------------------------- helper enlistment --------------------------
+
+    def mesh_pressure(self) -> dict:
+        """Summarise local mesh compute pressure for helper-enlistment planning."""
+        metrics = self.queue_metrics()
+        queued = int((metrics.get("counts") or {}).get("queued") or 0)
+        inflight = int((metrics.get("counts") or {}).get("inflight") or 0)
+        workers = dict(metrics.get("workers") or {})
+        total_slots = int(workers.get("total_slots") or 0)
+        available_slots = int(workers.get("available_slots") or 0)
+        oldest_queued_at = metrics.get("oldest_queued_at") or ""
+        pressure = str(metrics.get("pressure") or "idle").strip().lower()
+        backlog_ratio = metrics.get("backlog_ratio")
+        reasons: list[str] = []
+        if pressure == "saturated":
+            reasons.append("queue_saturated")
+        elif pressure == "elevated":
+            reasons.append("queue_elevated")
+        if total_slots <= 0 and (queued > 0 or inflight > 0):
+            reasons.append("no_local_slots")
+        if available_slots <= 0 and queued > 0:
+            reasons.append("no_available_slots")
+        if queued > max(1, total_slots) * 2 and total_slots > 0:
+            reasons.append("backlog_gt_2x_slots")
+        compute_profile = dict(self.device_profile.get("compute_profile") or {})
+        # surface GPU-weighted saturation signal for workload_class=gpu_*
+        if self.device_profile.get("battery_powered") and pressure in {"saturated", "elevated"}:
+            reasons.append("battery_under_load")
+        return {
+            "peer_id": self.node_id,
+            "pressure": pressure,
+            "queued": queued,
+            "inflight": inflight,
+            "total_slots": total_slots,
+            "available_slots": available_slots,
+            "backlog_ratio": backlog_ratio,
+            "oldest_queued_at": oldest_queued_at,
+            "gpu_capable": bool(compute_profile.get("gpu_capable")),
+            "gpu_count": int(compute_profile.get("gpu_count") or 0),
+            "reasons": reasons,
+            "needs_help": bool(reasons and pressure in {"elevated", "saturated"}),
+            "observed_at": _utcnow(),
+        }
+
+    def _peer_enlistment_state(self, peer: dict) -> dict:
+        metadata = dict((peer or {}).get("metadata") or {})
+        enlistment = dict(metadata.get("enlistment") or {})
+        device_profile = dict(peer.get("device_profile") or {})
+        return {
+            "peer_id": peer.get("peer_id") or "",
+            "display_name": peer.get("display_name") or peer.get("peer_id") or "",
+            "trust_tier": peer.get("trust_tier") or "trusted",
+            "mode": str(enlistment.get("mode") or "idle").strip().lower(),
+            "state": str(enlistment.get("state") or "unenlisted").strip().lower(),
+            "role": str(enlistment.get("role") or "").strip().lower(),
+            "enlisted_at": enlistment.get("enlisted_at") or "",
+            "last_action_at": enlistment.get("last_action_at") or "",
+            "last_reason": enlistment.get("last_reason") or "",
+            "source": enlistment.get("source") or "",
+            "drain_reason": enlistment.get("drain_reason") or "",
+            "device_class": device_profile.get("device_class") or "full",
+            "execution_tier": device_profile.get("execution_tier") or "standard",
+            "helper_state": device_profile.get("helper_state") or "active",
+            "compute_profile": dict(device_profile.get("compute_profile") or {}),
+            "history": list(enlistment.get("history") or [])[-8:],
+        }
+
+    def list_helpers(self, *, limit: int = 100) -> dict:
+        peers = self.list_peers(limit=limit).get("peers", [])
+        helpers = [self._peer_enlistment_state(peer) for peer in peers]
+        active = [item for item in helpers if item["state"] in {"enlisted", "draining"}]
+        return {
+            "peer_id": self.node_id,
+            "count": len(helpers),
+            "active_count": len(active),
+            "pressure": self.mesh_pressure(),
+            "helpers": helpers,
+        }
+
+    def _record_enlistment_action(
+        self,
+        peer_id: str,
+        *,
+        mode: Optional[str] = None,
+        state: Optional[str] = None,
+        role: Optional[str] = None,
+        reason: str = "",
+        source: str = "operator",
+        drain_reason: str = "",
+    ) -> dict:
+        existing_row = self._get_peer_row(peer_id)
+        if existing_row is None:
+            raise MeshPolicyError("peer not found for enlistment")
+        existing_metadata = dict(_loads_json(existing_row["metadata"], {}))
+        enlistment = dict(existing_metadata.get("enlistment") or {})
+        now = _utcnow()
+        history = list(enlistment.get("history") or [])
+        event_entry = {
+            "at": now,
+            "mode": mode if mode is not None else enlistment.get("mode"),
+            "state": state if state is not None else enlistment.get("state"),
+            "role": role if role is not None else enlistment.get("role"),
+            "reason": reason,
+            "source": source,
+        }
+        history.append(event_entry)
+        enlistment_update = dict(enlistment)
+        if mode is not None:
+            enlistment_update["mode"] = mode
+        if state is not None:
+            enlistment_update["state"] = state
+            if state == "enlisted" and not enlistment_update.get("enlisted_at"):
+                enlistment_update["enlisted_at"] = now
+            if state == "unenlisted":
+                enlistment_update["enlisted_at"] = ""
+        if role is not None:
+            enlistment_update["role"] = role
+        if source:
+            enlistment_update["source"] = source
+        if reason:
+            enlistment_update["last_reason"] = reason
+        if drain_reason:
+            enlistment_update["drain_reason"] = drain_reason
+        enlistment_update["last_action_at"] = now
+        enlistment_update["history"] = history[-20:]
+        existing_metadata["enlistment"] = enlistment_update
+        updated_peer = self._update_peer_record(peer_id, metadata=existing_metadata)
+        self._record_event(
+            "mesh.helper.action",
+            peer_id=peer_id,
+            payload={
+                "peer_id": peer_id,
+                "mode": enlistment_update.get("mode"),
+                "state": enlistment_update.get("state"),
+                "role": enlistment_update.get("role"),
+                "reason": reason,
+                "source": source,
+                "drain_reason": drain_reason,
+            },
+        )
+        return self._peer_enlistment_state(updated_peer)
+
+    def enlist_helper(
+        self,
+        peer_id: str,
+        *,
+        mode: str = "on_demand",
+        role: str = "helper",
+        reason: str = "operator_enlist",
+        source: str = "operator",
+    ) -> dict:
+        peer_token = str(peer_id or "").strip()
+        if not peer_token:
+            raise MeshPolicyError("peer_id is required")
+        mode_token = str(mode or "on_demand").strip().lower()
+        if mode_token not in {"on_demand", "always", "scheduled", "burst"}:
+            mode_token = "on_demand"
+        role_token = str(role or "helper").strip().lower()
+        if role_token not in {"helper", "relay", "gpu_helper", "drain"}:
+            role_token = "helper"
+        peer_row = self._get_peer_row(peer_token)
+        if peer_row is None:
+            raise MeshPolicyError("peer not found for enlistment")
+        trust = _normalize_trust_tier(peer_row["trust_tier"])
+        if trust in {"blocked", "public"}:
+            raise MeshPolicyError(f"cannot enlist peer with trust_tier={trust}")
+        return self._record_enlistment_action(
+            peer_token,
+            mode=mode_token,
+            state="enlisted",
+            role=role_token,
+            reason=reason,
+            source=source,
+        )
+
+    def drain_helper(
+        self,
+        peer_id: str,
+        *,
+        drain_reason: str = "operator_drain",
+        source: str = "operator",
+    ) -> dict:
+        peer_token = str(peer_id or "").strip()
+        if not peer_token:
+            raise MeshPolicyError("peer_id is required")
+        return self._record_enlistment_action(
+            peer_token,
+            state="draining",
+            reason=drain_reason,
+            drain_reason=drain_reason,
+            source=source,
+        )
+
+    def retire_helper(
+        self,
+        peer_id: str,
+        *,
+        reason: str = "operator_retire",
+        source: str = "operator",
+    ) -> dict:
+        peer_token = str(peer_id or "").strip()
+        if not peer_token:
+            raise MeshPolicyError("peer_id is required")
+        return self._record_enlistment_action(
+            peer_token,
+            mode="idle",
+            state="unenlisted",
+            role="",
+            reason=reason,
+            source=source,
+        )
+
+    def plan_helper_enlistment(
+        self,
+        *,
+        job: Optional[dict] = None,
+        pressure: Optional[dict] = None,
+        limit: int = 6,
+    ) -> dict:
+        mesh_pressure = dict(pressure or self.mesh_pressure())
+        job_input = dict(job or {})
+        if job_input:
+            placement = self._normalized_placement(job_input)
+        else:
+            placement = {
+                "workload_class": "default",
+                "gpu_required": bool(mesh_pressure.get("pressure") == "saturated" and mesh_pressure.get("gpu_capable")),
+                "queue_class": "default",
+            }
+        peers = self.list_peers(limit=200).get("peers", [])
+        candidates = []
+        synthetic_job = {"requirements": {"placement": placement}} if not job_input else job_input
+        for peer in peers:
+            enlistment = self._peer_enlistment_state(peer)
+            trust = _normalize_trust_tier(peer.get("trust_tier"))
+            if trust in {"blocked", "public"}:
+                continue
+            score, reasons = self._peer_candidate_score(peer, synthetic_job)
+            if score <= -10000:
+                continue
+            device_profile = dict(peer.get("device_profile") or {})
+            compute_profile = dict(device_profile.get("compute_profile") or {})
+            current_state = enlistment["state"]
+            score_bonus = 0
+            plan_reasons = list(reasons)
+            if current_state == "enlisted":
+                score_bonus += 80
+                plan_reasons.append("already_enlisted")
+            elif current_state == "draining":
+                score_bonus -= 180
+                plan_reasons.append("draining")
+            if compute_profile.get("gpu_capable"):
+                score_bonus += 60
+                plan_reasons.append("gpu_capable")
+            if device_profile.get("device_class") in {"full", "relay"}:
+                score_bonus += 40
+            if device_profile.get("battery_powered"):
+                score_bonus -= 30
+                plan_reasons.append("battery_powered")
+            candidates.append(
+                {
+                    "peer_id": peer.get("peer_id"),
+                    "display_name": peer.get("display_name") or peer.get("peer_id"),
+                    "trust_tier": trust,
+                    "score": score + score_bonus,
+                    "raw_placement_score": score,
+                    "enlistment": enlistment,
+                    "device_class": device_profile.get("device_class") or "full",
+                    "execution_tier": device_profile.get("execution_tier") or "standard",
+                    "compute_profile": compute_profile,
+                    "reasons": plan_reasons,
+                    "recommended_action": (
+                        "reuse" if current_state == "enlisted"
+                        else ("resume" if current_state == "draining" else "enlist")
+                    ),
+                }
+            )
+        candidates.sort(key=lambda item: item["score"], reverse=True)
+        picks = candidates[: max(1, int(limit or 6))]
+        return {
+            "peer_id": self.node_id,
+            "pressure": mesh_pressure,
+            "placement": placement,
+            "candidate_count": len(candidates),
+            "candidates": picks,
+            "generated_at": _utcnow(),
+        }
+
+    def auto_seek_help(
+        self,
+        *,
+        job: Optional[dict] = None,
+        max_enlist: int = 2,
+        mode: str = "on_demand",
+        reason: str = "auto_pressure",
+        allow_remote_seek: bool = False,
+        seek_hosts: Optional[list[str]] = None,
+    ) -> dict:
+        pressure = self.mesh_pressure()
+        plan = self.plan_helper_enlistment(job=job, pressure=pressure, limit=max(1, int(max_enlist or 2)) * 2)
+        enlisted = []
+        skipped = []
+        for candidate in plan.get("candidates") or []:
+            if len(enlisted) >= max(1, int(max_enlist or 2)):
+                break
+            peer_id = candidate.get("peer_id") or ""
+            action = candidate.get("recommended_action") or "enlist"
+            if action == "reuse":
+                skipped.append({"peer_id": peer_id, "reason": "already_enlisted"})
+                continue
+            try:
+                role = "gpu_helper" if candidate.get("compute_profile", {}).get("gpu_capable") else "helper"
+                state = self.enlist_helper(
+                    peer_id,
+                    mode=mode,
+                    role=role,
+                    reason=reason,
+                    source="auto",
+                )
+                enlisted.append({"peer_id": peer_id, "state": state})
+            except Exception as exc:
+                skipped.append({"peer_id": peer_id, "reason": str(exc)})
+        discovery: dict[str, Any] = {}
+        if allow_remote_seek and (not enlisted or pressure.get("pressure") == "saturated"):
+            try:
+                discovery = self.seek_peers(
+                    hosts=list(seek_hosts or []) or None,
+                    trust_tier="trusted",
+                    auto_connect=True,
+                    refresh_known=True,
+                )
+            except Exception as exc:
+                discovery = {"error": str(exc)}
+        self._record_event(
+            "mesh.helper.auto_seek",
+            peer_id=self.node_id,
+            payload={
+                "pressure": pressure,
+                "enlisted": [entry["peer_id"] for entry in enlisted],
+                "skipped": [entry["peer_id"] for entry in skipped],
+                "mode": mode,
+                "reason": reason,
+            },
+        )
+        return {
+            "peer_id": self.node_id,
+            "pressure": pressure,
+            "plan": plan,
+            "enlisted": enlisted,
+            "skipped": skipped,
+            "discovery": discovery,
+            "generated_at": _utcnow(),
+        }
+
+    def _row_to_offload_preference(self, row) -> dict:
+        if row is None:
+            return {}
+        return {
+            "peer_id": str(row["peer_id"] or "").strip(),
+            "workload_class": _normalize_workload_class(row["workload_class"] or "default"),
+            "preference": _normalize_preference_token(row["preference"] or "allow"),
+            "source": str(row["source"] or "").strip(),
+            "metadata": _loads_json(row["metadata"], {}),
+            "created_at": row["created_at"] or "",
+            "updated_at": row["updated_at"] or "",
+        }
+
+    def set_offload_preference(
+        self,
+        peer_id: str,
+        *,
+        workload_class: str = "default",
+        preference: str = "allow",
+        source: str = "operator",
+        metadata: Optional[dict] = None,
+    ) -> dict:
+        peer_token = str(peer_id or "").strip()
+        if not peer_token:
+            raise MeshPolicyError("peer_id is required")
+        workload_token = _normalize_workload_class(workload_class or "default")
+        preference_token = _normalize_preference_token(preference)
+        if self._get_peer_row(peer_token) is None:
+            raise MeshPolicyError("peer not found for offload preference")
+        now = _utcnow()
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO mesh_offload_preferences
+                (peer_id, workload_class, preference, source, metadata, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(peer_id, workload_class) DO UPDATE SET
+                    preference=excluded.preference,
+                    source=excluded.source,
+                    metadata=excluded.metadata,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    peer_token,
+                    workload_token,
+                    preference_token,
+                    str(source or "operator").strip(),
+                    json.dumps(dict(metadata or {})),
+                    now,
+                    now,
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM mesh_offload_preferences WHERE peer_id=? AND workload_class=?",
+                (peer_token, workload_token),
+            ).fetchone()
+            conn.commit()
+        result = self._row_to_offload_preference(row)
+        self._record_event(
+            "mesh.offload.preference",
+            peer_id=peer_token,
+            payload={
+                "peer_id": peer_token,
+                "workload_class": workload_token,
+                "preference": preference_token,
+                "source": str(source or "operator").strip(),
+            },
+        )
+        return result
+
+    def list_offload_preferences(
+        self,
+        *,
+        limit: int = 100,
+        peer_id: str = "",
+        workload_class: str = "",
+    ) -> dict:
+        query = ["SELECT * FROM mesh_offload_preferences WHERE 1=1"]
+        args: list[Any] = []
+        if str(peer_id or "").strip():
+            query.append("AND peer_id=?")
+            args.append(str(peer_id or "").strip())
+        if str(workload_class or "").strip():
+            query.append("AND workload_class=?")
+            args.append(_normalize_workload_class(workload_class))
+        query.append("ORDER BY updated_at DESC LIMIT ?")
+        args.append(max(1, int(limit or 100)))
+        with self._conn() as conn:
+            rows = conn.execute("\n".join(query), tuple(args)).fetchall()
+        items = [self._row_to_offload_preference(row) for row in rows]
+        return {"peer_id": self.node_id, "count": len(items), "preferences": items}
+
+    def _offload_preferences_map(self, workload_class: str) -> dict[str, dict]:
+        workload_token = _normalize_workload_class(workload_class or "default")
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM mesh_offload_preferences
+                WHERE workload_class IN (?, 'default')
+                ORDER BY CASE WHEN workload_class=? THEN 0 ELSE 1 END, updated_at DESC
+                """,
+                (workload_token, workload_token),
+            ).fetchall()
+        mapped: dict[str, dict] = {}
+        for row in rows:
+            item = self._row_to_offload_preference(row)
+            peer_token = item.get("peer_id") or ""
+            if peer_token and peer_token not in mapped:
+                mapped[peer_token] = item
+        return mapped
+
+    def evaluate_autonomous_offload(self, *, job: Optional[dict] = None) -> dict:
+        policy = _normalize_offload_policy(
+            (self.device_profile or {}).get("offload_policy") or {},
+            self.device_profile,
+        )
+        pressure = self.mesh_pressure()
+        job_input = dict(job or {})
+        if job_input:
+            placement = self._normalized_placement(job_input)
+        else:
+            placement = {
+                "workload_class": "default",
+                "gpu_required": False,
+                "queue_class": "default",
+            }
+        threshold_ok = _pressure_rank(pressure.get("pressure")) >= _pressure_rank(policy.get("pressure_threshold"))
+        result = {
+            "peer_id": self.node_id,
+            "policy": policy,
+            "pressure": pressure,
+            "placement": placement,
+            "decision": "noop",
+            "action": "idle",
+            "approval_required": False,
+            "reasons": [],
+            "candidate_count": 0,
+            "eligible_candidate_count": 0,
+            "candidates": [],
+            "eligible_candidates": [],
+            "generated_at": _utcnow(),
+        }
+        if not policy.get("enabled"):
+            result["reasons"].append("policy_disabled")
+            return result
+        if not pressure.get("needs_help"):
+            result["reasons"].append("pressure_does_not_need_help")
+            return result
+        if not threshold_ok:
+            result["reasons"].append("pressure_below_threshold")
+            return result
+        workload_class = _normalize_workload_class(placement.get("workload_class") or "default")
+        allowed_workloads = set(policy.get("allowed_workload_classes") or [])
+        if allowed_workloads and workload_class not in allowed_workloads:
+            result["reasons"].append("workload_not_allowed_by_policy")
+            return result
+        plan = self.plan_helper_enlistment(
+            job=job_input,
+            pressure=pressure,
+            limit=max(2, int(policy.get("max_auto_enlist") or 2) * 3),
+        )
+        candidates = list(plan.get("candidates") or [])
+        preference_map = self._offload_preferences_map(workload_class)
+        eligible = []
+        approval_reasons: list[str] = []
+        for candidate in candidates:
+            trust = _normalize_trust_tier(candidate.get("trust_tier"))
+            device_class = str(candidate.get("device_class") or "full").strip().lower()
+            compute_profile = dict(candidate.get("compute_profile") or {})
+            score = int(candidate.get("score") or 0)
+            peer_pref = dict(preference_map.get(candidate.get("peer_id") or "") or {})
+            pref_token = _normalize_preference_token(peer_pref.get("preference") or "allow")
+            candidate["offload_preference"] = peer_pref
+            if trust not in set(policy.get("allowed_trust_tiers") or []):
+                continue
+            if device_class not in set(policy.get("allowed_device_classes") or []):
+                continue
+            if not policy.get("allow_battery_helpers") and "battery_powered" in set(candidate.get("reasons") or []):
+                continue
+            if pref_token == "deny":
+                candidate["reasons"] = list(candidate.get("reasons") or []) + ["preference_deny"]
+                continue
+            if score < int(policy.get("min_candidate_score") or 0):
+                continue
+            if pref_token == "avoid":
+                candidate["reasons"] = list(candidate.get("reasons") or []) + ["preference_avoid"]
+                continue
+            if pref_token == "prefer":
+                candidate["score"] = score + 120
+                candidate["reasons"] = list(candidate.get("reasons") or []) + ["preference_prefer"]
+            eligible.append(candidate)
+            if trust in set(policy.get("approval_trust_tiers") or []):
+                approval_reasons.append(f"trust_tier_requires_approval:{trust}")
+            if device_class in set(policy.get("approval_device_classes") or []):
+                approval_reasons.append(f"device_class_requires_approval:{device_class}")
+            if policy.get("approval_for_gpu_helpers") and compute_profile.get("gpu_capable"):
+                approval_reasons.append("gpu_helper_requires_approval")
+            if workload_class in set(policy.get("approval_workload_classes") or []):
+                approval_reasons.append(f"workload_requires_approval:{workload_class}")
+            if pref_token == "approval":
+                approval_reasons.append("preference_requires_approval")
+        eligible.sort(key=lambda item: int(item.get("score") or 0), reverse=True)
+        result["candidate_count"] = len(candidates)
+        result["eligible_candidate_count"] = len(eligible)
+        result["candidates"] = candidates
+        result["eligible_candidates"] = eligible[: max(1, int(policy.get("max_auto_enlist") or 2))]
+        if not eligible:
+            result["reasons"].append("no_eligible_helpers")
+            return result
+        if policy.get("mode") == "manual":
+            result["decision"] = "suggest"
+            result["action"] = "manual"
+            result["reasons"].append("manual_mode")
+            return result
+        if policy.get("mode") == "approval" or approval_reasons:
+            result["decision"] = "request_approval"
+            result["action"] = "approval"
+            result["approval_required"] = True
+            result["reasons"].extend(_unique_tokens(approval_reasons))
+            return result
+        result["decision"] = "auto_enlist"
+        result["action"] = "auto"
+        result["reasons"].append("policy_allows_auto_enlist")
+        return result
+
+    def _autonomous_offload_request_id(self, evaluation: dict) -> str:
+        eligible = list(evaluation.get("eligible_candidates") or [])
+        peer_ids = sorted(str(item.get("peer_id") or "") for item in eligible if str(item.get("peer_id") or "").strip())
+        placement = dict(evaluation.get("placement") or {})
+        pressure = dict(evaluation.get("pressure") or {})
+        basis = json.dumps(
+            {
+                "node_id": self.node_id,
+                "peers": peer_ids,
+                "pressure": pressure.get("pressure"),
+                "workload_class": placement.get("workload_class"),
+                "gpu_required": placement.get("gpu_required"),
+            },
+            sort_keys=True,
+        )
+        return "autonomy-offload-" + hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
+
+    def _apply_autonomous_offload_approval(
+        self,
+        approval: dict,
+        *,
+        decision: str = "approved",
+        operator_peer_id: str = "",
+        operator_agent_id: str = "",
+        reason: str = "",
+    ) -> dict:
+        metadata = dict(approval.get("metadata") or {})
+        autonomy = dict(metadata.get("autonomous_offload") or {})
+        if not autonomy:
+            return {"status": "ignored", "reason": "not_autonomous_offload"}
+        peer_ids = [str(item).strip() for item in (autonomy.get("peer_ids") or []) if str(item).strip()]
+        if not peer_ids:
+            return {"status": "ignored", "reason": "no_helper_peers"}
+        workload_class = _normalize_workload_class(autonomy.get("workload_class") or "default")
+        decision_token = str(decision or "approved").strip().lower()
+        if decision_token in {"rejected", "deferred"}:
+            learned = []
+            learned_pref = "deny" if decision_token == "rejected" else "approval"
+            for peer_id in peer_ids:
+                learned.append(
+                    self.set_offload_preference(
+                        peer_id,
+                        workload_class=workload_class,
+                        preference=learned_pref,
+                        source="approval_memory",
+                        metadata={"operator_peer_id": operator_peer_id, "operator_agent_id": operator_agent_id},
+                    )
+                )
+            return {"status": "learned", "preference": learned_pref, "preferences": learned}
+        max_enlist = max(1, int(autonomy.get("max_auto_enlist") or 1))
+        enlisted = []
+        skipped = []
+        for peer_id in peer_ids:
+            if len(enlisted) >= max_enlist:
+                break
+            try:
+                state = self.enlist_helper(
+                    peer_id,
+                    mode=str(autonomy.get("mode") or "on_demand"),
+                    role=str(autonomy.get("role") or "helper"),
+                    reason=str(reason or "approved_autonomous_offload"),
+                    source="approval",
+                )
+                enlisted.append({"peer_id": peer_id, "state": state})
+                self.set_offload_preference(
+                    peer_id,
+                    workload_class=workload_class,
+                    preference="allow",
+                    source="approval_memory",
+                    metadata={"operator_peer_id": operator_peer_id, "operator_agent_id": operator_agent_id},
+                )
+            except Exception as exc:
+                skipped.append({"peer_id": peer_id, "reason": str(exc)})
+        if enlisted:
+            self.publish_notification(
+                notification_type="helper.autonomy.applied",
+                priority="high",
+                title="Autonomous offload applied",
+                body=f"Enlisted {len(enlisted)} helper peer(s) after approval.",
+                target_peer_id=self.node_id,
+                target_device_classes=["full", "light", "micro"],
+                related_approval_id=approval.get("id") or "",
+                metadata={
+                    "peer_ids": [item["peer_id"] for item in enlisted],
+                    "operator_peer_id": operator_peer_id,
+                    "operator_agent_id": operator_agent_id,
+                },
+            )
+        return {
+            "status": "applied" if enlisted else "noop",
+            "enlisted": enlisted,
+            "skipped": skipped,
+        }
+
+    def run_autonomous_offload(
+        self,
+        *,
+        job: Optional[dict] = None,
+        actor_agent_id: str = "ocp-autonomy",
+    ) -> dict:
+        evaluation = self.evaluate_autonomous_offload(job=job)
+        decision = str(evaluation.get("decision") or "noop")
+        policy = dict(evaluation.get("policy") or {})
+        result: dict[str, Any] = {
+            "peer_id": self.node_id,
+            "evaluation": evaluation,
+            "status": decision,
+            "generated_at": _utcnow(),
+        }
+        if decision in {"noop", "suggest"}:
+            return result
+        if decision == "request_approval":
+            eligible = list(evaluation.get("eligible_candidates") or [])
+            request = self.create_approval_request(
+                title="Approve autonomous helper offload",
+                summary=f"Pressure is {evaluation.get('pressure', {}).get('pressure') or 'unknown'} and OCP wants to enlist {len(eligible)} helper peer(s).",
+                action_type="autonomous.offload",
+                severity="high" if str(evaluation.get("pressure", {}).get("pressure") or "") == "saturated" else "normal",
+                request_id=self._autonomous_offload_request_id(evaluation),
+                requested_by_peer_id=self.node_id,
+                requested_by_agent_id=actor_agent_id,
+                target_peer_id=self.node_id,
+                target_device_classes=policy.get("target_device_classes") or ["full", "light", "micro"],
+                metadata={
+                    "autonomous_offload": {
+                        "peer_ids": [item.get("peer_id") for item in eligible],
+                        "mode": "on_demand",
+                        "role": "gpu_helper" if any(dict(item.get("compute_profile") or {}).get("gpu_capable") for item in eligible) else "helper",
+                        "pressure": evaluation.get("pressure"),
+                        "placement": evaluation.get("placement"),
+                        "workload_class": _normalize_workload_class(dict(evaluation.get("placement") or {}).get("workload_class") or "default"),
+                        "max_auto_enlist": int(policy.get("max_auto_enlist") or 2),
+                    }
+                },
+            )
+            result["approval"] = request
+            result["status"] = "approval_requested"
+            return result
+        auto_result = self.auto_seek_help(
+            job=job,
+            max_enlist=int(policy.get("max_auto_enlist") or 2),
+            mode="on_demand",
+            reason="policy_auto_offload",
+            allow_remote_seek=bool(policy.get("allow_remote_seek")),
+        )
+        result["auto_seek"] = auto_result
+        result["status"] = "auto_enlisted"
+        if policy.get("notify_on_action") and (auto_result.get("enlisted") or []):
+            self.publish_notification(
+                notification_type="helper.autonomy.enlisted",
+                priority="high",
+                title="Autonomous helper offload active",
+                body=f"Enlisted {len(auto_result.get('enlisted') or [])} helper peer(s) for local pressure relief.",
+                target_peer_id=self.node_id,
+                target_device_classes=policy.get("target_device_classes") or ["full", "light", "micro"],
+                metadata={"peer_ids": [item.get("peer_id") for item in auto_result.get("enlisted") or []]},
+            )
+        return result
 
     def stream_snapshot(self, *, since_seq: int = 0, limit: int = 50) -> dict:
         with self._conn() as conn:
@@ -5485,6 +8151,46 @@ class SovereignMesh:
             placement.get("required_device_classes")
             or ([placement.get("required_device_class")] if placement.get("required_device_class") else [])
         )
+        workload_class = _normalize_workload_class(
+            placement.get("workload_class")
+            or (job.get("metadata") or {}).get("workload_class")
+            or "default"
+        )
+        resource_needs = _normalize_resources(
+            placement.get("resource_needs")
+            or (job.get("requirements") or {}).get("resources")
+            or {}
+        )
+        gpu_required_raw = placement.get("gpu_required")
+        if gpu_required_raw is None:
+            gpu_required = (
+                bool(resource_needs.get("gpus"))
+                or workload_class in {"gpu_inference", "gpu_training"}
+            )
+        else:
+            gpu_required = bool(gpu_required_raw)
+        gpu_class_preferred = _normalize_gpu_class(
+            placement.get("gpu_class_preferred")
+            or placement.get("preferred_gpu_class")
+            or ""
+        )
+        if gpu_class_preferred == "none":
+            gpu_class_preferred = ""
+        min_gpu_vram_mb_raw = placement.get("min_gpu_vram_mb") or placement.get("gpu_vram_mb")
+        try:
+            min_gpu_vram_mb = max(0, int(min_gpu_vram_mb_raw or 0))
+        except Exception:
+            min_gpu_vram_mb = 0
+        min_memory_mb_raw = placement.get("min_memory_mb") or resource_needs.get("memory_mb")
+        try:
+            min_memory_mb = max(0, int(min_memory_mb_raw or 0))
+        except Exception:
+            min_memory_mb = 0
+        min_cpu_raw = placement.get("min_cpu_cores") or resource_needs.get("cpu")
+        try:
+            min_cpu = max(0.0, float(min_cpu_raw or 0))
+        except Exception:
+            min_cpu = 0.0
         return {
             "queue_class": queue_class,
             "execution_class": execution_class,
@@ -5504,6 +8210,13 @@ class SovereignMesh:
             "require_stable_network": bool(placement.get("require_stable_network")),
             "avoid_battery": bool(placement.get("avoid_battery")),
             "require_artifact_mirror": bool(placement.get("require_artifact_mirror")),
+            "workload_class": workload_class,
+            "gpu_required": bool(gpu_required),
+            "gpu_class_preferred": gpu_class_preferred,
+            "min_gpu_vram_mb": int(min_gpu_vram_mb),
+            "min_memory_mb": int(min_memory_mb),
+            "min_cpu_cores": float(min_cpu),
+            "resource_needs": resource_needs,
         }
 
     def _peer_is_public_lane(self, peer: Optional[dict]) -> bool:
@@ -5574,14 +8287,46 @@ class SovereignMesh:
         return hint
 
     def _device_profile_execution_limits(self, profile: dict) -> dict:
-        tier = str(profile.get("execution_tier") or "standard").strip().lower()
+        normalized = _normalize_device_profile(profile)
+        tier = str(normalized.get("execution_tier") or "standard").strip().lower()
+        compute_profile = dict(normalized.get("compute_profile") or {})
         if tier == "light":
-            return {"cpu": 1.0, "memory_mb": 1024, "disk_mb": 2048, "gpus": 0}
-        if tier == "standard":
-            return {"cpu": 4.0, "memory_mb": 8192, "disk_mb": 16384, "gpus": 0}
-        if tier == "heavy":
-            return {"cpu": None, "memory_mb": None, "disk_mb": None, "gpus": None}
-        return {"cpu": 0.0, "memory_mb": 0, "disk_mb": 0, "gpus": 0}
+            baseline = {"cpu": 1.0, "memory_mb": 1024, "disk_mb": 2048, "gpus": 0}
+        elif tier == "standard":
+            baseline = {"cpu": 4.0, "memory_mb": 8192, "disk_mb": 16384, "gpus": 0}
+        elif tier == "heavy":
+            baseline = {"cpu": None, "memory_mb": None, "disk_mb": None, "gpus": None}
+        else:
+            baseline = {"cpu": 0.0, "memory_mb": 0, "disk_mb": 0, "gpus": 0}
+        cpu_cores = int(compute_profile.get("cpu_cores") or 0)
+        memory_mb = int(compute_profile.get("memory_mb") or 0)
+        disk_mb = int(compute_profile.get("disk_mb") or 0)
+        gpu_count = int(compute_profile.get("gpu_count") or 0)
+        # Compute profile can override tier baseline only when the tier is
+        # heavy (unbounded) or when the reported capacity is stricter than the
+        # tier cap. This keeps the tier's intent as the authoritative cap and
+        # avoids quietly loosening limits via device-profile defaults.
+        if cpu_cores > 0:
+            if baseline["cpu"] is None:
+                baseline["cpu"] = float(cpu_cores)
+            else:
+                baseline["cpu"] = min(float(cpu_cores), baseline["cpu"])
+        if memory_mb > 0:
+            if baseline["memory_mb"] is None:
+                baseline["memory_mb"] = memory_mb
+            else:
+                baseline["memory_mb"] = min(memory_mb, baseline["memory_mb"])
+        if disk_mb > 0:
+            if baseline["disk_mb"] is None:
+                baseline["disk_mb"] = disk_mb
+            else:
+                baseline["disk_mb"] = min(disk_mb, baseline["disk_mb"])
+        if gpu_count > 0:
+            if baseline["gpus"] is None:
+                baseline["gpus"] = gpu_count
+            else:
+                baseline["gpus"] = max(baseline["gpus"], gpu_count)
+        return baseline
 
     def _device_profile_allows_job(self, profile: dict, job: dict, *, requires_worker: bool) -> tuple[bool, str]:
         normalized = _normalize_device_profile(profile)
@@ -5623,9 +8368,75 @@ class SovereignMesh:
     ) -> tuple[int, list[str]]:
         normalized = _normalize_device_profile(profile)
         reasons = self._device_profile_schedule_reasons(normalized)
+        compute_profile = dict(normalized.get("compute_profile") or {})
+        workload_class = str(placement.get("workload_class") or "default").strip().lower()
+        gpu_required = bool(placement.get("gpu_required"))
+        gpu_class_preferred = str(placement.get("gpu_class_preferred") or "").strip().lower()
+        gpu_capable = bool(compute_profile.get("gpu_capable"))
+        gpu_class = str(compute_profile.get("gpu_class") or "none").strip().lower()
+        gpu_vram = int(compute_profile.get("gpu_vram_mb") or 0)
+        helper_state = str(normalized.get("helper_state") or "active").strip().lower()
+        if helper_state == "retired" and requires_worker and remote:
+            return -10000, reasons + ["helper_retired"]
+        if helper_state == "draining" and requires_worker:
+            reasons.append("helper_draining_penalty")
+        if gpu_required and requires_worker and not gpu_capable:
+            return -10000, reasons + ["gpu_required_not_available"]
+        supports = set(compute_profile.get("supports_workload_classes") or [])
+        if workload_class in {"gpu_training"} and requires_worker and "gpu_training" not in supports and gpu_vram < 16384:
+            return -10000, reasons + ["workload_class_not_supported"]
+        if placement.get("min_gpu_vram_mb") and requires_worker and gpu_capable and gpu_vram < int(placement.get("min_gpu_vram_mb") or 0):
+            return -10000, reasons + ["gpu_vram_insufficient"]
+        if placement.get("min_memory_mb"):
+            memory_mb = int(compute_profile.get("memory_mb") or 0)
+            if requires_worker and memory_mb > 0 and memory_mb < int(placement.get("min_memory_mb") or 0):
+                return -10000, reasons + ["memory_insufficient"]
+        if placement.get("min_cpu_cores"):
+            cpu_cores = float(compute_profile.get("cpu_cores") or 0)
+            if requires_worker and cpu_cores > 0 and cpu_cores < float(placement.get("min_cpu_cores") or 0):
+                return -10000, reasons + ["cpu_cores_insufficient"]
         resilience = dict(sync_resilience or {})
         device_class = normalized["device_class"]
         score = {"full": 90, "light": -40, "micro": -260, "relay": -180}.get(device_class, 0)
+        # Compute-profile driven nudges
+        if requires_worker:
+            cpu_cores = int(compute_profile.get("cpu_cores") or 0)
+            memory_mb = int(compute_profile.get("memory_mb") or 0)
+            if cpu_cores >= 32:
+                score += 80
+                reasons.append("cpu_many_cores_bonus")
+            elif cpu_cores >= 8:
+                score += 30
+                reasons.append("cpu_cores_bonus")
+            if memory_mb >= 65536:
+                score += 40
+                reasons.append("memory_large_bonus")
+            elif memory_mb >= 16384:
+                score += 15
+                reasons.append("memory_mid_bonus")
+        if workload_class in {"gpu_inference", "gpu_training", "mixed"}:
+            if gpu_capable:
+                score += 260 if workload_class == "gpu_training" else 180
+                reasons.append(f"gpu_match_{workload_class}")
+                if gpu_class_preferred and gpu_class_preferred == gpu_class:
+                    score += 90
+                    reasons.append("gpu_class_preferred_match")
+                if placement.get("min_gpu_vram_mb") and gpu_vram >= int(placement.get("min_gpu_vram_mb") or 0):
+                    score += 40
+                    reasons.append("gpu_vram_sufficient")
+            else:
+                score -= 120
+                reasons.append("gpu_missing_penalty")
+        elif workload_class == "cpu_bound" and requires_worker:
+            cpu_cores = int(compute_profile.get("cpu_cores") or 0)
+            if cpu_cores >= 8:
+                score += 60
+                reasons.append("cpu_bound_match")
+        if helper_state == "draining":
+            score -= 220
+        elif helper_state == "active" and str(normalized.get("helper_role") or "") == "helper":
+            score += 45
+            reasons.append("active_helper_bonus")
         if normalized.get("sleep_capable"):
             reasons.append("sleep_capable")
         if normalized.get("intermittent"):
@@ -6142,6 +8953,18 @@ class SovereignMesh:
             score += 250
             reasons.append("placement_preferred_peer")
         score += self._peer_worker_slots(peer) * 15
+        enlistment_meta = dict((peer.get("metadata") or {}).get("enlistment") or {})
+        enlistment_state = str(enlistment_meta.get("state") or "").strip().lower()
+        enlistment_role = str(enlistment_meta.get("role") or "").strip().lower()
+        if enlistment_state == "enlisted":
+            score += 180
+            reasons.append("helper_enlisted_bonus")
+            if enlistment_role == "gpu_helper" and placement.get("workload_class") in {"gpu_inference", "gpu_training", "mixed"}:
+                score += 120
+                reasons.append("gpu_helper_preferred")
+        elif enlistment_state == "draining":
+            score -= 140
+            reasons.append("helper_draining_penalty")
         return score, reasons
 
     def select_execution_target(
@@ -7817,7 +10640,24 @@ class SovereignMesh:
             peer_id=updated.get("target_peer_id") or self.node_id,
             payload={"approval_id": updated["id"], "decision": decision_token},
         )
-        return {"status": decision_token, "approval": updated, "notification": resolution_notification}
+        response = {"status": decision_token, "approval": updated, "notification": resolution_notification}
+        if decision_token == "approved":
+            response["automation"] = self._apply_autonomous_offload_approval(
+                updated,
+                decision=decision_token,
+                operator_peer_id=operator_peer_id,
+                operator_agent_id=operator_agent_id,
+                reason=reason,
+            )
+        elif decision_token in {"rejected", "deferred"}:
+            response["automation"] = self._apply_autonomous_offload_approval(
+                updated,
+                decision=decision_token,
+                operator_peer_id=operator_peer_id,
+                operator_agent_id=operator_agent_id,
+                reason=reason,
+            )
+        return response
 
     def notify_peer(
         self,
@@ -8145,6 +10985,7 @@ class SovereignMesh:
             "attempts": attempts,
             "queue": queue_message,
             "spec": spec,
+            "mission": dict(metadata.get("mission") or {}),
             "latest_checkpoint_ref": dict(metadata.get("latest_checkpoint_ref") or {}),
             "resume_checkpoint_ref": dict(metadata.get("resume_checkpoint_ref") or {}),
             "selected_resume_checkpoint_ref": dict(metadata.get("resume_checkpoint_ref") or {}),
@@ -8165,6 +11006,33 @@ class SovereignMesh:
             "result_attestation_ref": dict(metadata.get("result_attestation_ref") or {}),
             "result_artifacts": dict(metadata.get("result_artifacts") or {}),
             "secret_delivery": [dict(item) for item in list(metadata.get("secret_delivery") or [])],
+        }
+
+    def _row_to_mission(self, row) -> Optional[dict]:
+        if row is None:
+            return None
+        mission = MissionRecord(
+            id=row["id"],
+            request_id=row["request_id"] or "",
+            title=row["title"] or "",
+            intent=row["intent"] or "",
+            status=_normalize_mission_status(row["status"]),
+            priority=_normalize_mission_priority(row["priority"]),
+            workload_class=_normalize_workload_class(row["workload_class"]),
+            origin_peer_id=row["origin_peer_id"] or self.node_id,
+            target_strategy=_normalize_target_strategy(row["target_strategy"]),
+            policy=_normalize_mission_policy(_loads_json(row["policy"], {})),
+            continuity=_normalize_mission_continuity(_loads_json(row["continuity"], {})),
+            metadata=_loads_json(row["metadata"], {}),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        ).to_dict()
+        return mission | {
+            "child_job_ids": _unique_tokens(_loads_json(row["child_job_ids"], [])),
+            "cooperative_task_ids": _unique_tokens(_loads_json(row["cooperative_task_ids"], [])),
+            "latest_checkpoint_ref": dict(_loads_json(row["latest_checkpoint_ref"], {})),
+            "result_ref": dict(_loads_json(row["result_ref"], {})),
+            "result_bundle_ref": dict(_loads_json(row["result_bundle_ref"], {})),
         }
 
     def _row_to_handoff(self, row) -> dict:

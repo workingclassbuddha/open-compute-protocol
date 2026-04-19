@@ -63,6 +63,23 @@ Related planning docs:
 - Recovery hints that explicitly steer checkpointed intermittent-node work back toward stable `full` or `relay` peers
 - Durable notification inboxes for operator, phone, watch, and relay control flows with compact presentation hints for `light` and `micro` devices
 - Durable approval inboxes with request, expiry, resolution, and linked notification records for app-neutral operator control
+- Mobile-first web control page for phone browsers with live peer, inbox, and approval actions backed by the native mesh endpoints
+- Stronger phone operator deck with queue/recovery cards, direct resume/restart/replay/cancel controls, and live auto-refresh
+- Active peer seek/discovery with candidate tracking, optional auto-connect, and mesh-visible discovery records
+- Cooperative task groups that fan one logical task into multiple child jobs across local and remote peers
+- Aggregated cooperative-task state with child-job summaries so multiple machines can act on one larger job together
+- First Mission Layer with durable mission objects above jobs and cooperative task groups
+- Mission launch paths that wrap a single local job or a cooperative task launch without replacing existing execution primitives
+- Mission continuity tracking with child-job lineage, checkpoint/result references, UI drill-down links, mission-level resume/restart/cancel controls, and status propagation from execution state
+- Mesh Pulse control-deck panorama with live mission/queue/helper/approval/notification summaries and a cross-system activity stream for operator visibility
+- Compute-profile-aware device modeling with CPU, memory, disk, accelerator, GPU class, and VRAM hints
+- Helper enlistment planning and lifecycle controls for enlist, drain, retire, and pressure-triggered auto-seek
+- GPU-aware scheduling and cooperative shard placement so GPU-heavy work can prefer the right helper peer
+- Mesh pressure reporting that surfaces local saturation and whether helper compute should be enlisted
+- Policy-driven autonomous offload with safe defaults for manual, approval-gated, and auto-enlist helper behavior
+- Approval-backed autonomous offload application so a granted operator decision can immediately enlist the proposed helper peers
+- Durable offload preference memory by peer and workload class so OCP can remember prefer, allow, approval, avoid, and deny choices
+- Workload-class-aware autonomy rules so only selected workload classes are auto-offloaded while others can require approval or stay local
 - Resumability contract in the job envelope with checkpoint policy, explicit recovery states, resume metadata, and retry-time checkpoint recovery
 - Operator recovery controls for resume-latest, resume-from-checkpoint, and clean restart
 - First-class checkpoint lifecycle on jobs with latest checkpoint refs, selected resume refs, resume counters, and operator recovery audit fields
@@ -109,6 +126,15 @@ Related planning docs:
 - First bundle/checkpoint graph sync foundation for richer multi-device recovery and result mobility
 - Device-class-aware peer identity, intermittent sync posture, and recovery foundations for all-device mesh expansion
 - App-neutral mobile control plane foundation for notifications, approvals, and compact operator inbox flows
+- Phone-friendly web controller surface served directly by the standalone OCP node
+- Mobile operator workflow for acting on queue-backed jobs and resumable recovery from the phone browser
+- First active peer-discovery baseline for operator-driven mesh expansion
+- First cooperative multi-peer execution baseline for splitting a single task across multiple computers
+- First mission-oriented orchestration baseline for keeping higher-level intent durable across retries, checkpoints, restarts, and cooperative handoffs
+- First autonomous helper-enlistment baseline for bringing extra devices into the mesh when the local node is saturated
+- First GPU-aware helper selection baseline for CPU/GPU split planning across multiple peers
+- First trust-gated autonomy layer so offload can escalate to approvals instead of blindly auto-enlisting peers
+- First persistent offload-memory layer so approved or rejected helper choices can influence future autonomy decisions
 - Trust-aware and load-aware scheduler foundations
 - Test coverage for multi-node execution and scheduling behavior
 
@@ -121,6 +147,7 @@ Related planning docs:
 ## Key OCP surfaces in this repo
 
 - Manifest: `GET /mesh/manifest`
+- Phone control UI: `GET /control`
 - Device profile: `GET /mesh/device-profile`
 - Peer stream snapshot: `GET /mesh/stream`
 - Peer registry: `GET /mesh/peers`
@@ -142,6 +169,29 @@ Related planning docs:
 - Approval inbox: `GET /mesh/approvals`
 - Approval request: `POST /mesh/approvals/request`
 - Approval resolve: `POST /mesh/approvals/{approval_id}/resolve`
+- Discovery candidates: `GET /mesh/discovery/candidates`
+- Discovery seek: `POST /mesh/discovery/seek`
+- Mission list: `GET /mesh/missions`
+- Mission inspect: `GET /mesh/missions/{mission_id}`
+- Mission launch: `POST /mesh/missions/launch`
+- Mission cancel: `POST /mesh/missions/{mission_id}/cancel`
+- Mission resume latest: `POST /mesh/missions/{mission_id}/resume`
+- Mission resume checkpoint: `POST /mesh/missions/{mission_id}/resume-from-checkpoint`
+- Mission restart: `POST /mesh/missions/{mission_id}/restart`
+- Cooperative task list: `GET /mesh/cooperative-tasks`
+- Cooperative task inspect: `GET /mesh/cooperative-tasks/{task_id}`
+- Cooperative task launch: `POST /mesh/cooperative-tasks/launch`
+- Mesh pressure: `GET /mesh/pressure`
+- Helper list: `GET /mesh/helpers`
+- Helper enlistment plan: `POST /mesh/helpers/plan`
+- Helper enlist: `POST /mesh/helpers/enlist`
+- Helper drain: `POST /mesh/helpers/drain`
+- Helper retire: `POST /mesh/helpers/retire`
+- Helper auto-seek: `POST /mesh/helpers/auto-seek`
+- Helper preference list: `GET /mesh/helpers/preferences`
+- Helper preference set: `POST /mesh/helpers/preferences/set`
+- Helper autonomy evaluate: `GET /mesh/helpers/autonomy`
+- Helper autonomy run: `POST /mesh/helpers/autonomy/run`
 - Secret list: `GET /mesh/secrets`
 - Secret put: `POST /mesh/secrets/put`
 - Worker heartbeat: `POST /mesh/workers/{worker_id}/heartbeat`
@@ -162,8 +212,8 @@ Related planning docs:
 
 ## Recommended next OCP builds
 
-1. Add stronger relay artifact promotion and resumable-job handoff semantics for sleeping mobile peers.
-2. Add push/event bridge adapters so phone and watch clients can receive durable OCP notifications without polling.
+1. Add a mission launch helper in the control surface so operators can create single-job or cooperative missions without dropping to raw JSON.
+2. Add cooperative task launch UIs and richer GPU execution lanes so mixed CPU/GPU mesh jobs are easier to create, inspect, and drain.
 
 ## Broader roadmap
 
@@ -178,4 +228,4 @@ python3 -m unittest tests.test_sovereign_mesh
 ```
 
 Current standalone baseline:
-- `tests.test_sovereign_mesh`: 85 tests passing
+- `tests.test_sovereign_mesh`: 117 tests passing

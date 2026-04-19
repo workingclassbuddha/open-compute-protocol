@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
+from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 root_str = str(ROOT)
@@ -62,17 +63,47 @@ class ProbeHandler:
     def __init__(self):
         self.payload = None
         self.code = None
+        self.content_type = None
 
     def _send_json(self, data, code=200):
         self.payload = data
         self.code = code
 
+    def _send_html(self, data, code=200):
+        self.payload = data
+        self.code = code
+        self.content_type = "text/html; charset=utf-8"
+
 
 ProbeHandler._mesh = server.OCPHandler._mesh
+ProbeHandler._handle_control_page = server.OCPHandler._handle_control_page
 ProbeHandler._handle_mesh_manifest = server.OCPHandler._handle_mesh_manifest
 ProbeHandler._handle_mesh_device_profile = server.OCPHandler._handle_mesh_device_profile
 ProbeHandler._handle_mesh_device_profile_update = server.OCPHandler._handle_mesh_device_profile_update
+ProbeHandler._handle_mesh_discovery_candidates = server.OCPHandler._handle_mesh_discovery_candidates
+ProbeHandler._handle_mesh_discovery_seek = server.OCPHandler._handle_mesh_discovery_seek
 ProbeHandler._handle_mesh_peers_sync = server.OCPHandler._handle_mesh_peers_sync
+ProbeHandler._handle_mesh_missions = server.OCPHandler._handle_mesh_missions
+ProbeHandler._handle_mesh_mission_get = server.OCPHandler._handle_mesh_mission_get
+ProbeHandler._handle_mesh_mission_launch = server.OCPHandler._handle_mesh_mission_launch
+ProbeHandler._handle_mesh_mission_cancel = server.OCPHandler._handle_mesh_mission_cancel
+ProbeHandler._handle_mesh_mission_resume = server.OCPHandler._handle_mesh_mission_resume
+ProbeHandler._handle_mesh_mission_resume_from_checkpoint = server.OCPHandler._handle_mesh_mission_resume_from_checkpoint
+ProbeHandler._handle_mesh_mission_restart = server.OCPHandler._handle_mesh_mission_restart
+ProbeHandler._handle_mesh_cooperative_tasks = server.OCPHandler._handle_mesh_cooperative_tasks
+ProbeHandler._handle_mesh_cooperative_task_get = server.OCPHandler._handle_mesh_cooperative_task_get
+ProbeHandler._handle_mesh_cooperative_task_launch = server.OCPHandler._handle_mesh_cooperative_task_launch
+ProbeHandler._handle_mesh_pressure = server.OCPHandler._handle_mesh_pressure
+ProbeHandler._handle_mesh_helpers = server.OCPHandler._handle_mesh_helpers
+ProbeHandler._handle_mesh_helpers_plan = server.OCPHandler._handle_mesh_helpers_plan
+ProbeHandler._handle_mesh_helpers_enlist = server.OCPHandler._handle_mesh_helpers_enlist
+ProbeHandler._handle_mesh_helpers_drain = server.OCPHandler._handle_mesh_helpers_drain
+ProbeHandler._handle_mesh_helpers_retire = server.OCPHandler._handle_mesh_helpers_retire
+ProbeHandler._handle_mesh_helpers_auto_seek = server.OCPHandler._handle_mesh_helpers_auto_seek
+ProbeHandler._handle_mesh_helpers_preferences = server.OCPHandler._handle_mesh_helpers_preferences
+ProbeHandler._handle_mesh_helpers_preferences_set = server.OCPHandler._handle_mesh_helpers_preferences_set
+ProbeHandler._handle_mesh_helpers_autonomy = server.OCPHandler._handle_mesh_helpers_autonomy
+ProbeHandler._handle_mesh_helpers_autonomy_run = server.OCPHandler._handle_mesh_helpers_autonomy_run
 ProbeHandler._handle_mesh_workers = server.OCPHandler._handle_mesh_workers
 ProbeHandler._handle_mesh_notifications = server.OCPHandler._handle_mesh_notifications
 ProbeHandler._handle_mesh_notification_publish = server.OCPHandler._handle_mesh_notification_publish
@@ -107,21 +138,69 @@ def make_mesh_http_server(mesh):
             self.end_headers()
             self.wfile.write(raw)
 
+        def _send_html(self, payload, code=200):
+            raw = str(payload or "").encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
         def do_GET(self):
             parsed = urlparse(self.path)
             path = parsed.path
             params = parse_qs(parsed.query)
             try:
+                if path in {"/", "/control", "/control/mobile"}:
+                    self._send_html(server.build_control_page(mesh))
+                    return
                 if path == "/mesh/manifest":
                     self._send_json(mesh.get_manifest())
                     return
                 if path == "/mesh/device-profile":
                     self._send_json({"status": "ok", "device_profile": dict(mesh.device_profile)})
                     return
+                if path == "/mesh/discovery/candidates":
+                    limit = int(params.get("limit", ["25"])[0])
+                    self._send_json(mesh.list_discovery_candidates(limit=limit, status=params.get("status", [""])[0]))
+                    return
                 if path == "/mesh/stream":
                     since = int(params.get("since", ["0"])[0])
                     limit = int(params.get("limit", ["50"])[0])
                     self._send_json(mesh.stream_snapshot(since_seq=since, limit=limit))
+                    return
+                if path == "/mesh/missions":
+                    limit = int(params.get("limit", ["25"])[0])
+                    self._send_json(mesh.list_missions(limit=limit, status=params.get("status", [""])[0]))
+                    return
+                if path.startswith("/mesh/missions/"):
+                    self._send_json(mesh.get_mission(path.split("/mesh/missions/", 1)[1]))
+                    return
+                if path == "/mesh/cooperative-tasks":
+                    limit = int(params.get("limit", ["25"])[0])
+                    self._send_json(mesh.list_cooperative_tasks(limit=limit, state=params.get("state", [""])[0]))
+                    return
+                if path.startswith("/mesh/cooperative-tasks/"):
+                    self._send_json(mesh.get_cooperative_task(path.split("/mesh/cooperative-tasks/", 1)[1]))
+                    return
+                if path == "/mesh/pressure":
+                    self._send_json(mesh.mesh_pressure())
+                    return
+                if path == "/mesh/helpers":
+                    limit = int(params.get("limit", ["100"])[0])
+                    self._send_json(mesh.list_helpers(limit=limit))
+                    return
+                if path == "/mesh/helpers/preferences":
+                    self._send_json(
+                        mesh.list_offload_preferences(
+                            limit=int(params.get("limit", ["100"])[0]),
+                            peer_id=params.get("peer_id", [""])[0],
+                            workload_class=params.get("workload_class", [""])[0],
+                        )
+                    )
+                    return
+                if path == "/mesh/helpers/autonomy":
+                    self._send_json(mesh.evaluate_autonomous_offload())
                     return
                 if path == "/mesh/workers":
                     limit = int(params.get("limit", ["25"])[0])
@@ -227,6 +306,22 @@ def make_mesh_http_server(mesh):
                 if path == "/mesh/device-profile":
                     self._send_json(mesh.update_device_profile(dict(payload.get("device_profile") or {})))
                     return
+                if path == "/mesh/discovery/seek":
+                    self._send_json(
+                        mesh.seek_peers(
+                            base_urls=list(payload.get("base_urls") or []),
+                            hosts=list(payload.get("hosts") or []),
+                            cidr=(payload.get("cidr") or "").strip(),
+                            port=int(payload.get("port") or 8421),
+                            trust_tier=(payload.get("trust_tier") or "trusted").strip(),
+                            auto_connect=bool(payload.get("auto_connect", False)),
+                            include_self=bool(payload.get("include_self", False)),
+                            limit=int(payload.get("limit") or 32),
+                            timeout=float(payload.get("timeout") or 2.0),
+                            refresh_known=bool(payload.get("refresh_known", True)),
+                        )
+                    )
+                    return
                 if path == "/mesh/notifications/publish":
                     self._send_json(
                         {
@@ -306,6 +401,147 @@ def make_mesh_http_server(mesh):
                             preferred_peer_id=(payload.get("preferred_peer_id") or "").strip(),
                             allow_local=bool(payload.get("allow_local", True)),
                             allow_remote=bool(payload.get("allow_remote", True)),
+                        )
+                    )
+                    return
+                if path == "/mesh/missions/launch":
+                    self._send_json(
+                        mesh.launch_mission(
+                            title=(payload.get("title") or "").strip(),
+                            intent=(payload.get("intent") or "").strip(),
+                            request_id=(payload.get("request_id") or "").strip() or None,
+                            priority=(payload.get("priority") or "normal").strip(),
+                            workload_class=(payload.get("workload_class") or "").strip(),
+                            target_strategy=(payload.get("target_strategy") or "").strip(),
+                            policy=dict(payload.get("policy") or {}),
+                            continuity=dict(payload.get("continuity") or {}),
+                            metadata=dict(payload.get("metadata") or {}),
+                            job=dict(payload.get("job") or {}),
+                            cooperative_task=dict(payload.get("cooperative_task") or {}),
+                        )
+                    )
+                    return
+                if path.startswith("/mesh/missions/") and path.endswith("/cancel"):
+                    mission_id = path[len("/mesh/missions/"):-len("/cancel")].strip("/")
+                    self._send_json(
+                        mesh.cancel_mission(
+                            mission_id,
+                            operator_id=(payload.get("operator_id") or "").strip(),
+                            reason=(payload.get("reason") or "mission_cancelled").strip(),
+                        )
+                    )
+                    return
+                if path.startswith("/mesh/missions/") and path.endswith("/resume-from-checkpoint"):
+                    mission_id = path[len("/mesh/missions/"):-len("/resume-from-checkpoint")].strip("/")
+                    self._send_json(
+                        mesh.resume_mission_from_checkpoint(
+                            mission_id,
+                            operator_id=(payload.get("operator_id") or "").strip(),
+                            reason=(payload.get("reason") or "mission_resume_checkpoint").strip(),
+                            checkpoint_artifact_id=(payload.get("checkpoint_artifact_id") or "").strip(),
+                        )
+                    )
+                    return
+                if path.startswith("/mesh/missions/") and path.endswith("/resume"):
+                    mission_id = path[len("/mesh/missions/"):-len("/resume")].strip("/")
+                    self._send_json(
+                        mesh.resume_mission(
+                            mission_id,
+                            operator_id=(payload.get("operator_id") or "").strip(),
+                            reason=(payload.get("reason") or "mission_resume_latest").strip(),
+                        )
+                    )
+                    return
+                if path.startswith("/mesh/missions/") and path.endswith("/restart"):
+                    mission_id = path[len("/mesh/missions/"):-len("/restart")].strip("/")
+                    self._send_json(
+                        mesh.restart_mission(
+                            mission_id,
+                            operator_id=(payload.get("operator_id") or "").strip(),
+                            reason=(payload.get("reason") or "mission_restart").strip(),
+                        )
+                    )
+                    return
+                if path == "/mesh/cooperative-tasks/launch":
+                    self._send_json(
+                        mesh.launch_cooperative_task(
+                            name=(payload.get("name") or "").strip(),
+                            request_id=(payload.get("request_id") or "").strip() or None,
+                            strategy=(payload.get("strategy") or "spread").strip(),
+                            allow_local=bool(payload.get("allow_local", True)),
+                            allow_remote=bool(payload.get("allow_remote", True)),
+                            target_peer_ids=list(payload.get("target_peer_ids") or []),
+                            base_job=dict(payload.get("base_job") or {}),
+                            shards=list(payload.get("shards") or []),
+                            auto_enlist=bool(payload.get("auto_enlist", False)),
+                        )
+                    )
+                    return
+                if path == "/mesh/helpers/plan":
+                    self._send_json(
+                        mesh.plan_helper_enlistment(
+                            job=dict(payload.get("job") or {}),
+                            limit=int(payload.get("limit") or 6),
+                        )
+                    )
+                    return
+                if path == "/mesh/helpers/enlist":
+                    self._send_json(
+                        mesh.enlist_helper(
+                            (payload.get("peer_id") or "").strip(),
+                            mode=(payload.get("mode") or "on_demand").strip(),
+                            role=(payload.get("role") or "helper").strip(),
+                            reason=(payload.get("reason") or "operator_enlist").strip(),
+                            source=(payload.get("source") or "operator").strip(),
+                        )
+                    )
+                    return
+                if path == "/mesh/helpers/drain":
+                    self._send_json(
+                        mesh.drain_helper(
+                            (payload.get("peer_id") or "").strip(),
+                            drain_reason=(payload.get("drain_reason") or payload.get("reason") or "operator_drain").strip(),
+                            source=(payload.get("source") or "operator").strip(),
+                        )
+                    )
+                    return
+                if path == "/mesh/helpers/retire":
+                    self._send_json(
+                        mesh.retire_helper(
+                            (payload.get("peer_id") or "").strip(),
+                            reason=(payload.get("reason") or "operator_retire").strip(),
+                            source=(payload.get("source") or "operator").strip(),
+                        )
+                    )
+                    return
+                if path == "/mesh/helpers/auto-seek":
+                    self._send_json(
+                        mesh.auto_seek_help(
+                            job=dict(payload.get("job") or {}),
+                            max_enlist=int(payload.get("max_enlist") or 2),
+                            mode=(payload.get("mode") or "on_demand").strip(),
+                            reason=(payload.get("reason") or "auto_pressure").strip(),
+                            allow_remote_seek=bool(payload.get("allow_remote_seek") or False),
+                            seek_hosts=list(payload.get("seek_hosts") or []) or None,
+                        )
+                    )
+                    return
+                if path == "/mesh/helpers/preferences/set":
+                    self._send_json(
+                        mesh.set_offload_preference(
+                            (payload.get("peer_id") or "").strip(),
+                            workload_class=(payload.get("workload_class") or "default").strip(),
+                            preference=(payload.get("preference") or "allow").strip(),
+                            source=(payload.get("source") or "operator").strip(),
+                            metadata=dict(payload.get("metadata") or {}),
+                        )
+                    )
+                    return
+                if path == "/mesh/helpers/autonomy/run":
+                    self._send_json(
+                        mesh.run_autonomous_offload(
+                            job=dict(payload.get("job") or {}),
+                            actor_agent_id=(payload.get("actor_agent_id") or "test-client").strip(),
                         )
                     )
                     return
@@ -662,6 +898,43 @@ class SovereignMeshTests(unittest.TestCase):
         )
         return {"submitted": submitted, "claimed": claimed, "failed": failed}
 
+    def _checkpointed_mission(
+        self,
+        stack,
+        *,
+        worker_id="beta-worker",
+        request_id="checkpointed-mission",
+        code="import os; print(os.environ.get('OCP_RESUME_ARTIFACT_ID', 'fresh'))",
+    ):
+        self._register_default_worker(stack, worker_id=worker_id)
+        mission = stack.mesh.launch_mission(
+            title=f"Mission {request_id}",
+            intent="Mission recovery test",
+            request_id=request_id,
+            continuity={"resumable": True, "checkpoint_strategy": "manual"},
+            job={
+                "kind": "python.inline",
+                "dispatch_mode": "queued",
+                "requirements": {"capabilities": ["python"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "payload": {"code": code},
+                "artifact_inputs": [],
+                "metadata": {
+                    "retry_policy": {"max_attempts": 1},
+                    "resumability": {"enabled": True},
+                    "checkpoint_policy": {"enabled": True, "mode": "manual", "on_retry": False},
+                },
+            },
+        )
+        claimed = stack.mesh.claim_next_job(worker_id, job_id=mission["child_job_ids"][0], ttl_seconds=120)
+        failed = stack.mesh.fail_job_attempt(
+            claimed["attempt"]["id"],
+            error="mission checkpoint failure",
+            retryable=False,
+            metadata={"checkpoint": {"cursor": 11, "phase": "saved"}},
+        )
+        return {"mission": stack.mesh.get_mission(mission["id"]), "claimed": claimed, "failed": failed}
+
     def test_signed_handshake_rejects_bad_signature_stale_timestamp_and_replay(self):
         alpha = self.make_stack("alpha")
         beta = self.make_stack("beta")
@@ -717,6 +990,23 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertTrue(beta_stream["agent_presence"])
         self.assertIn("beta-node", {peer["peer_id"] for peer in alpha_stream["peers"]})
         self.assertIn("alpha-node", {peer["peer_id"] for peer in beta_stream["peers"]})
+
+    def test_seek_peers_discovers_and_auto_connects_reachable_peer(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+
+        _, beta_base_url = self.serve_mesh(beta)
+
+        sought = alpha.mesh.seek_peers(base_urls=[beta_base_url], auto_connect=True, trust_tier="trusted")
+
+        self.assertEqual(sought["discovered"], 1)
+        self.assertEqual(sought["connected"], 1)
+        self.assertEqual(sought["results"][0]["peer_id"], "beta-node")
+        peers = alpha.mesh.list_peers(limit=10)["peers"]
+        self.assertEqual(peers[0]["peer_id"], "beta-node")
+        candidates = alpha.mesh.list_discovery_candidates(limit=10)
+        self.assertEqual(candidates["count"], 1)
+        self.assertEqual(candidates["candidates"][0]["status"], "connected")
 
     def test_handoff_is_deduplicated_by_request_id(self):
         alpha = self.make_stack("alpha")
@@ -2757,6 +3047,55 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(remote_jobs["jobs"][0]["origin"], "alpha-node")
         self.assertEqual(remote_jobs["jobs"][0]["target"], "beta-node")
 
+    def test_cooperative_task_spreads_child_jobs_across_local_and_remote_peers(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        alpha.mesh.register_worker(
+            worker_id="alpha-worker",
+            agent_id=alpha.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 1},
+        )
+        beta.mesh.register_worker(
+            worker_id="beta-worker",
+            agent_id=beta.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 1},
+        )
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_peer(base_url=beta_base_url, trust_tier="trusted")
+
+        task = alpha.mesh.launch_cooperative_task(
+            name="dual-node-shell",
+            request_id="cooperative-shell-1",
+            target_peer_ids=["alpha-node", "beta-node"],
+            base_job={
+                "kind": "shell.command",
+                "dispatch_mode": "queued",
+                "requirements": {"capabilities": ["shell"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "payload": {"command": [sys.executable, "-c", "print('base')"]},
+                "artifact_inputs": [],
+            },
+            shards=[
+                {"label": "local", "payload": {"command": [sys.executable, "-c", "print('local-shard')"]}},
+                {"label": "remote", "payload": {"command": [sys.executable, "-c", "print('remote-shard')"]}},
+            ],
+        )
+
+        self.assertEqual(task["shard_count"], 2)
+        self.assertEqual({child["peer_id"] for child in task["children"]}, {"alpha-node", "beta-node"})
+        beta_jobs = beta.mesh.poll_jobs("beta-worker", limit=10)
+        self.assertEqual(beta_jobs["jobs"][0]["origin"], "alpha-node")
+        self.assertEqual(beta_jobs["jobs"][0]["target"], "beta-node")
+
+        alpha.mesh.run_worker_once("alpha-worker")
+        beta.mesh.run_worker_once("beta-worker")
+
+        refreshed = alpha.mesh.get_cooperative_task(task["id"])
+        self.assertEqual(refreshed["state"], "completed")
+        self.assertEqual(refreshed["summary"]["counts"]["completed"], 2)
+
     def test_scheduler_stay_local_unplaces_when_no_local_worker_exists(self):
         alpha = self.make_stack("alpha")
         beta = self.make_stack("beta")
@@ -3745,6 +4084,70 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(probe.payload["implementation"]["name"], "Sovereign Mesh")
         self.assertEqual(probe.payload["organism_card"]["organism_id"], "alpha-node")
 
+    def test_server_control_page_handler_returns_mobile_html(self):
+        alpha = self.make_stack("alpha")
+        self._register_default_worker(alpha, worker_id="alpha-control-worker")
+        alpha.mesh.submit_local_job(
+            {
+                "kind": "python.inline",
+                "dispatch_mode": "queued",
+                "requirements": {"capabilities": ["python"]},
+                "payload": {"code": "print('queued from control deck')"},
+            },
+            request_id="control-queued-job",
+        )
+        self._checkpointed_job(alpha, request_id="control-checkpointed-job")
+        alpha.mesh.publish_notification(
+            notification_type="job.summary",
+            priority="high",
+            title="Watch review needed",
+            body="Compact review body",
+            target_peer_id="alpha-node",
+            target_device_classes=["micro"],
+        )
+        alpha.mesh.create_approval_request(
+            title="Approve resume",
+            summary="Resume on stable relay",
+            action_type="job.recovery.resume",
+            severity="high",
+            target_peer_id="alpha-node",
+            target_device_classes=["micro"],
+        )
+        alpha.mesh.launch_mission(
+            title="Probe Control Mission",
+            intent="Expose mission layer in rendered control HTML",
+            request_id="control-probe-mission",
+            job={
+                "kind": "python.inline",
+                "dispatch_mode": "queued",
+                "requirements": {"capabilities": ["python"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "payload": {"code": "print('probe control mission')"},
+            },
+        )
+        checkpointed_mission = self._checkpointed_mission(alpha, worker_id="alpha-control-worker", request_id="control-mission-recovery")
+        server.server_context["mesh"] = alpha.mesh
+        probe = ProbeHandler()
+
+        probe._handle_control_page()
+
+        self.assertEqual(probe.code, 200)
+        self.assertEqual(probe.content_type, "text/html; charset=utf-8")
+        self.assertIn("OCP Control Deck", probe.payload)
+        self.assertIn("Watch review needed", probe.payload)
+        self.assertIn("Approve resume", probe.payload)
+        self.assertIn("Mesh Pulse", probe.payload)
+        self.assertIn("Live Mission Stream", probe.payload)
+        self.assertIn("Recovery + Queue", probe.payload)
+        self.assertIn("Mission Layer", probe.payload)
+        self.assertIn("Probe Control Mission", probe.payload)
+        self.assertIn("Resume Latest", probe.payload)
+        self.assertIn("Resume Checkpoint", probe.payload)
+        self.assertIn("Restart Mission", probe.payload)
+        self.assertIn(checkpointed_mission["mission"]["id"], probe.payload)
+        self.assertIn("Cancel Job", probe.payload)
+        self.assertIn("/mesh/notifications", probe.payload)
+
     def test_server_mesh_device_profile_handlers_round_trip_profile(self):
         alpha = self.make_stack("alpha")
         server.server_context["mesh"] = alpha.mesh
@@ -3772,6 +4175,23 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(probe.payload["device_profile"]["network_profile"], "wifi")
         self.assertTrue(probe.payload["device_profile"]["battery_powered"])
 
+    def test_server_discovery_handlers_round_trip(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        _, beta_base_url = self.serve_mesh(beta)
+        server.server_context["mesh"] = alpha.mesh
+        probe = ProbeHandler()
+
+        probe._handle_mesh_discovery_seek({"base_urls": [beta_base_url], "auto_connect": True, "trust_tier": "trusted"})
+        self.assertEqual(probe.code, 200)
+        self.assertEqual(probe.payload["connected"], 1)
+
+        probe = ProbeHandler()
+        probe._handle_mesh_discovery_candidates({"limit": ["10"], "status": [""]})
+        self.assertEqual(probe.code, 200)
+        self.assertEqual(probe.payload["count"], 1)
+        self.assertEqual(probe.payload["candidates"][0]["peer_id"], "beta-node")
+
     def test_device_profile_endpoint_is_exposed_over_http(self):
         alpha = self.make_stack("alpha")
         alpha_client, _ = self.serve_mesh(alpha)
@@ -3791,6 +4211,19 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(updated["device_profile"]["device_class"], "micro")
         self.assertEqual(fetched["device_profile"]["form_factor"], "watch")
         self.assertFalse(fetched["device_profile"]["compute_ready"])
+
+    def test_discovery_endpoints_are_exposed_over_http(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        alpha_client, _ = self.serve_mesh(alpha)
+        _, beta_base_url = self.serve_mesh(beta)
+
+        sought = alpha_client.seek_peers({"base_urls": [beta_base_url], "auto_connect": True, "trust_tier": "trusted"})
+        self.assertEqual(sought["connected"], 1)
+
+        candidates = alpha_client.list_discovery_candidates(limit=10)
+        self.assertEqual(candidates["count"], 1)
+        self.assertEqual(candidates["candidates"][0]["peer_id"], "beta-node")
 
     def test_notification_and_approval_endpoints_are_exposed_over_http(self):
         alpha = self.make_stack("alpha")
@@ -3830,6 +4263,420 @@ class SovereignMeshTests(unittest.TestCase):
 
         resolved = alpha_client.resolve_approval(approval_id, decision="approved", operator_peer_id="watch-node")
         self.assertEqual(resolved["approval"]["status"], "approved")
+
+    def test_control_page_is_exposed_over_http(self):
+        alpha = self.make_stack("alpha")
+        self._register_default_worker(alpha, worker_id="alpha-control-worker")
+        alpha.mesh.submit_local_job(
+            {
+                "kind": "python.inline",
+                "dispatch_mode": "queued",
+                "requirements": {"capabilities": ["python"]},
+                "payload": {"code": "print('queued from control deck')"},
+            },
+            request_id="control-http-queued-job",
+        )
+        alpha.mesh.publish_notification(
+            notification_type="job.summary",
+            priority="high",
+            title="Relay status ready",
+            body="Phone controller can see this.",
+            target_peer_id="alpha-node",
+            target_device_classes=["light"],
+        )
+        alpha.mesh.launch_mission(
+            title="Control Mission",
+            intent="Expose mission visibility in cockpit",
+            request_id="control-http-mission",
+            job={
+                "kind": "python.inline",
+                "dispatch_mode": "queued",
+                "requirements": {"capabilities": ["python"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "payload": {"code": "print('control mission')"},
+                "metadata": {
+                    "resumability": {"enabled": True},
+                    "checkpoint_policy": {"enabled": True, "mode": "manual"},
+                },
+            },
+        )
+        alpha.mesh.run_worker_once("alpha-control-worker")
+        alpha_client, base_url = self.serve_mesh(alpha)
+
+        with urlopen(f"{base_url}/control") as response:
+            markup = response.read().decode("utf-8")
+            content_type = response.headers.get("Content-Type")
+
+        self.assertEqual(content_type, "text/html; charset=utf-8")
+        self.assertIn("OCP Control Deck", markup)
+        self.assertIn("Relay status ready", markup)
+        self.assertIn("Mesh Pulse", markup)
+        self.assertIn("Live Mission Stream", markup)
+        self.assertIn("Recovery + Queue", markup)
+        self.assertIn("Mission Layer", markup)
+        self.assertIn("Control Mission", markup)
+        self.assertIn("Primary Job", markup)
+        self.assertIn("Result Bundle", markup)
+        self.assertIn("/mesh/artifacts/", markup)
+        self.assertIn("/mesh/jobs/", markup)
+        self.assertIn("Cancel Job", markup)
+        self.assertIn("Refresh Deck", markup)
+        self.assertIn("ocp-mobile-ui", markup)
+
+    def test_mission_launch_wraps_local_job_and_tracks_completion(self):
+        beta = self.make_stack("beta")
+        self._register_default_worker(beta)
+
+        mission = beta.mesh.launch_mission(
+            title="Local Mission",
+            intent="Run one queued job under mission control",
+            request_id="mission-local-1",
+            priority="high",
+            workload_class="cpu_bound",
+            continuity={"resumable": True},
+            job={
+                "kind": "python.inline",
+                "dispatch_mode": "queued",
+                "requirements": {"capabilities": ["python"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "payload": {"code": "print('mission-local')"},
+                "artifact_inputs": [],
+                "metadata": {
+                    "resumability": {"enabled": True},
+                    "checkpoint_policy": {"enabled": True, "mode": "manual"},
+                },
+            },
+        )
+
+        self.assertEqual(mission["status"], "waiting")
+        self.assertEqual(mission["title"], "Local Mission")
+        self.assertEqual(len(mission["child_job_ids"]), 1)
+        child_job = beta.mesh.get_job(mission["child_job_ids"][0])
+        self.assertEqual(child_job["mission"]["mission_id"], mission["id"])
+
+        executed = beta.mesh.run_worker_once("beta-worker")
+        self.assertEqual(executed["status"], "completed")
+
+        completed_mission = beta.mesh.get_mission(mission["id"])
+        self.assertEqual(completed_mission["status"], "completed")
+        self.assertTrue(completed_mission["result_ref"]["id"])
+        self.assertTrue(completed_mission["result_bundle_ref"]["id"])
+        self.assertEqual(completed_mission["lineage"]["jobs"][0]["id"], child_job["id"])
+        self.assertEqual(completed_mission["lineage"]["result_bundle_ref"]["id"], completed_mission["result_bundle_ref"]["id"])
+
+    def test_mission_reflects_checkpointed_child_state(self):
+        beta = self.make_stack("beta")
+        self._register_default_worker(beta)
+
+        mission = beta.mesh.launch_mission(
+            title="Checkpoint Mission",
+            intent="Hold continuity across failure",
+            request_id="mission-checkpoint-1",
+            continuity={"resumable": True, "checkpoint_strategy": "manual"},
+            job={
+                "kind": "python.inline",
+                "dispatch_mode": "queued",
+                "requirements": {"capabilities": ["python"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "payload": {"code": "print('mission-checkpoint')"},
+                "artifact_inputs": [],
+                "metadata": {
+                    "retry_policy": {"max_attempts": 1},
+                    "resumability": {"enabled": True},
+                    "checkpoint_policy": {"enabled": True, "mode": "manual", "on_retry": False},
+                },
+            },
+        )
+
+        claimed = beta.mesh.claim_next_job("beta-worker", job_id=mission["child_job_ids"][0], ttl_seconds=120)
+        failed = beta.mesh.fail_job_attempt(
+            claimed["attempt"]["id"],
+            error="mission checkpoint failure",
+            retryable=False,
+            metadata={"checkpoint": {"cursor": 7, "phase": "saved"}},
+        )
+        self.assertEqual(failed["job"]["status"], "checkpointed")
+
+        checkpointed_mission = beta.mesh.get_mission(mission["id"])
+        self.assertEqual(checkpointed_mission["status"], "checkpointed")
+        self.assertTrue(checkpointed_mission["continuity"]["checkpoint_ready"])
+        self.assertTrue(checkpointed_mission["latest_checkpoint_ref"]["id"])
+        self.assertTrue(checkpointed_mission["continuity"]["resumable"])
+        self.assertEqual(
+            checkpointed_mission["lineage"]["latest_checkpoint_ref"]["id"],
+            checkpointed_mission["latest_checkpoint_ref"]["id"],
+        )
+
+    def test_mission_resume_latest_recovers_checkpointed_child_job(self):
+        beta = self.make_stack("beta")
+        state = self._checkpointed_mission(beta, request_id="mission-resume-latest")
+        mission = state["mission"]
+
+        resumed = beta.mesh.resume_mission(
+            mission["id"],
+            operator_id="operator-mission",
+            reason="resume mission latest",
+        )
+        self.assertEqual(resumed["mission"]["metadata"]["last_control_action"], "resume_latest")
+        self.assertEqual(len(resumed["jobs"]), 1)
+        self.assertEqual(resumed["jobs"][0]["status"], "retry_wait")
+
+        executed = beta.mesh.run_worker_once("beta-worker")
+        self.assertEqual(executed["status"], "completed")
+        completed_mission = beta.mesh.get_mission(mission["id"])
+        self.assertEqual(completed_mission["status"], "completed")
+
+    def test_mission_resume_from_checkpoint_supports_single_child_override(self):
+        beta = self.make_stack("beta")
+        state = self._checkpointed_mission(beta, request_id="mission-resume-explicit")
+        mission = state["mission"]
+        child_job = beta.mesh.get_job(mission["child_job_ids"][0])
+        alternate_checkpoint = beta.mesh.publish_local_artifact(
+            {"cursor": 99, "phase": "manual-override"},
+            media_type="application/json",
+            policy=child_job["policy"],
+            metadata={"artifact_kind": "checkpoint", "job_id": child_job["id"], "retention_class": "durable"},
+        )
+
+        resumed = beta.mesh.resume_mission_from_checkpoint(
+            mission["id"],
+            operator_id="operator-mission",
+            reason="resume mission checkpoint",
+            checkpoint_artifact_id=alternate_checkpoint["id"],
+        )
+        self.assertEqual(resumed["mission"]["metadata"]["last_control_action"], "resume_checkpoint")
+        self.assertEqual(len(resumed["jobs"]), 1)
+
+        executed = beta.mesh.run_worker_once("beta-worker")
+        self.assertEqual(executed["status"], "completed")
+        completed_job = beta.mesh.get_job(child_job["id"])
+        self.assertEqual(
+            completed_job["attempts"][1]["metadata"]["resumed_from_checkpoint_ref"]["id"],
+            alternate_checkpoint["id"],
+        )
+
+    def test_mission_wraps_cooperative_task_launch(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        alpha.mesh.register_worker(
+            worker_id="alpha-worker",
+            agent_id=alpha.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 1},
+        )
+        beta.mesh.register_worker(
+            worker_id="beta-worker",
+            agent_id=beta.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 1},
+        )
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_peer(base_url=beta_base_url, trust_tier="trusted")
+
+        mission = alpha.mesh.launch_mission(
+            title="Cooperative Mission",
+            intent="Launch a distributed cooperative task under one mission",
+            request_id="mission-coop-1",
+            priority="high",
+            target_strategy="cooperative_spread",
+            cooperative_task={
+                "name": "mission-coop-task",
+                "strategy": "spread",
+                "target_peer_ids": ["alpha-node", "beta-node"],
+                "base_job": {
+                    "kind": "shell.command",
+                    "dispatch_mode": "queued",
+                    "requirements": {"capabilities": ["shell"]},
+                    "policy": {"classification": "trusted", "mode": "batch"},
+                    "payload": {"command": [sys.executable, "-c", "print('mission-base')"]},
+                    "artifact_inputs": [],
+                    "metadata": {"workload_class": "mixed"},
+                },
+                "shards": [
+                    {"label": "local", "payload": {"command": [sys.executable, "-c", "print('mission-local')"]}},
+                    {"label": "remote", "payload": {"command": [sys.executable, "-c", "print('mission-remote')"]}},
+                ],
+            },
+        )
+
+        self.assertEqual(mission["status"], "waiting")
+        self.assertEqual(len(mission["cooperative_task_ids"]), 1)
+        self.assertEqual(len(mission["child_job_ids"]), 2)
+        self.assertEqual(mission["summary"]["cooperative_task_count"], 1)
+        self.assertEqual(mission["summary"]["job_count"], 2)
+        self.assertEqual(
+            {job["mission"]["mission_id"] for job in mission["child_jobs"] if job.get("mission")},
+            {mission["id"]},
+        )
+        self.assertEqual(len(mission["lineage"]["cooperative_tasks"]), 1)
+
+    def test_cooperative_task_endpoints_are_exposed_over_http(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        alpha.mesh.register_worker(
+            worker_id="alpha-worker",
+            agent_id=alpha.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 1},
+        )
+        beta.mesh.register_worker(
+            worker_id="beta-worker",
+            agent_id=beta.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 1},
+        )
+        alpha_client, _ = self.serve_mesh(alpha)
+        _, beta_base_url = self.serve_mesh(beta)
+
+        alpha_client.seek_peers({"base_urls": [beta_base_url], "auto_connect": True, "trust_tier": "trusted"})
+        launched = alpha_client.launch_cooperative_task(
+            {
+                "name": "http-cooperative",
+                "request_id": "http-cooperative-1",
+                "target_peer_ids": ["alpha-node", "beta-node"],
+                "base_job": {
+                    "kind": "shell.command",
+                    "dispatch_mode": "queued",
+                    "requirements": {"capabilities": ["shell"]},
+                    "policy": {"classification": "trusted", "mode": "batch"},
+                    "payload": {"command": [sys.executable, "-c", "print('base-http')"]},
+                    "artifact_inputs": [],
+                },
+                "shards": [
+                    {"label": "local", "payload": {"command": [sys.executable, "-c", "print('local-http')"]}},
+                    {"label": "remote", "payload": {"command": [sys.executable, "-c", "print('remote-http')"]}},
+                ],
+            }
+        )
+        self.assertEqual(launched["shard_count"], 2)
+        task_id = launched["id"]
+
+        listed = alpha_client.list_cooperative_tasks(limit=10)
+        self.assertEqual(listed["count"], 1)
+        fetched = alpha_client.get_cooperative_task(task_id)
+        self.assertEqual(fetched["id"], task_id)
+        self.assertEqual({child["peer_id"] for child in fetched["children"]}, {"alpha-node", "beta-node"})
+
+    def test_mission_endpoints_are_exposed_over_http(self):
+        alpha = self.make_stack("alpha")
+        self._register_default_worker(alpha, worker_id="alpha-http-worker")
+        alpha_client, _ = self.serve_mesh(alpha)
+
+        launched = alpha_client.launch_mission(
+            {
+                "title": "HTTP Mission",
+                "intent": "Round-trip mission APIs",
+                "request_id": "http-mission-1",
+                "priority": "high",
+                "continuity": {"resumable": True},
+                "job": {
+                    "kind": "python.inline",
+                    "dispatch_mode": "queued",
+                    "requirements": {"capabilities": ["python"]},
+                    "policy": {"classification": "trusted", "mode": "batch"},
+                    "payload": {"code": "print('http mission')"},
+                    "metadata": {
+                        "resumability": {"enabled": True},
+                        "checkpoint_policy": {"enabled": True, "mode": "manual"},
+                    },
+                },
+            }
+        )
+        mission_id = launched["id"]
+        self.assertEqual(launched["status"], "waiting")
+
+        listed = alpha_client.list_missions(limit=10)
+        self.assertEqual(listed["count"], 1)
+        fetched = alpha_client.get_mission(mission_id)
+        self.assertEqual(fetched["id"], mission_id)
+
+        cancelled = alpha_client.cancel_mission(mission_id, reason="http cancel")
+        self.assertEqual(cancelled["mission"]["id"], mission_id)
+        self.assertEqual(cancelled["mission"]["status"], "cancelled")
+
+    def test_mission_recovery_endpoints_are_exposed_over_http(self):
+        alpha = self.make_stack("alpha")
+        state = self._checkpointed_mission(alpha, worker_id="alpha-http-worker", request_id="http-mission-recovery")
+        alpha_client, _ = self.serve_mesh(alpha)
+        mission_id = state["mission"]["id"]
+
+        resumed = alpha_client.resume_mission(mission_id, reason="http mission resume")
+        self.assertEqual(resumed["mission"]["metadata"]["last_control_action"], "resume_latest")
+        executed = alpha.mesh.run_worker_once("alpha-http-worker")
+        self.assertEqual(executed["status"], "completed")
+
+        state = self._checkpointed_mission(alpha, worker_id="alpha-http-worker", request_id="http-mission-checkpoint")
+        mission_id = state["mission"]["id"]
+        resumed_checkpoint = alpha_client.resume_mission_from_checkpoint(
+            mission_id,
+            reason="http mission checkpoint",
+        )
+        self.assertEqual(resumed_checkpoint["mission"]["metadata"]["last_control_action"], "resume_checkpoint")
+
+    def test_server_mission_handlers_round_trip(self):
+        alpha = self.make_stack("alpha")
+        self._register_default_worker(alpha, worker_id="alpha-probe-worker")
+        server.server_context["mesh"] = alpha.mesh
+        probe = ProbeHandler()
+
+        probe._handle_mesh_mission_launch(
+            {
+                "title": "Probe Mission",
+                "intent": "Launch through server handlers",
+                "request_id": "probe-mission-1",
+                "job": {
+                    "kind": "python.inline",
+                    "dispatch_mode": "queued",
+                    "requirements": {"capabilities": ["python"]},
+                    "policy": {"classification": "trusted", "mode": "batch"},
+                    "payload": {"code": "print('probe mission')"},
+                },
+            }
+        )
+        self.assertEqual(probe.code, 200)
+        mission_id = probe.payload["id"]
+
+        probe = ProbeHandler()
+        probe._handle_mesh_missions({"limit": ["10"], "status": [""]})
+        self.assertEqual(probe.code, 200)
+        self.assertEqual(probe.payload["count"], 1)
+
+        probe = ProbeHandler()
+        probe._handle_mesh_mission_get(f"/mesh/missions/{mission_id}")
+        self.assertEqual(probe.code, 200)
+        self.assertEqual(probe.payload["id"], mission_id)
+
+        probe = ProbeHandler()
+        probe._handle_mesh_mission_cancel(
+            f"/mesh/missions/{mission_id}/cancel",
+            {"operator_id": "probe-ui", "reason": "probe cancel"},
+        )
+        self.assertEqual(probe.code, 200)
+        self.assertEqual(probe.payload["mission"]["status"], "cancelled")
+
+    def test_server_mission_recovery_handlers_round_trip(self):
+        alpha = self.make_stack("alpha")
+        state = self._checkpointed_mission(alpha, worker_id="alpha-probe-worker", request_id="probe-mission-recovery")
+        mission_id = state["mission"]["id"]
+        server.server_context["mesh"] = alpha.mesh
+        probe = ProbeHandler()
+
+        probe._handle_mesh_mission_resume(
+            f"/mesh/missions/{mission_id}/resume",
+            {"operator_id": "probe-ui", "reason": "probe resume"},
+        )
+        self.assertEqual(probe.code, 200)
+        self.assertEqual(probe.payload["mission"]["metadata"]["last_control_action"], "resume_latest")
+
+        state = self._checkpointed_mission(alpha, worker_id="alpha-probe-worker", request_id="probe-mission-recovery-checkpoint")
+        mission_id = state["mission"]["id"]
+        probe = ProbeHandler()
+        probe._handle_mesh_mission_resume_from_checkpoint(
+            f"/mesh/missions/{mission_id}/resume-from-checkpoint",
+            {"operator_id": "probe-ui", "reason": "probe checkpoint"},
+        )
+        self.assertEqual(probe.code, 200)
+        self.assertEqual(probe.payload["mission"]["metadata"]["last_control_action"], "resume_checkpoint")
 
     def test_server_mesh_worker_handlers_register_and_list_workers(self):
         alpha = self.make_stack("alpha")
@@ -3913,6 +4760,58 @@ class SovereignMeshTests(unittest.TestCase):
         )
         self.assertEqual(probe.code, 200)
         self.assertEqual(probe.payload["approval"]["status"], "approved")
+
+    def test_server_cooperative_task_handlers_round_trip(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        alpha.mesh.register_worker(
+            worker_id="alpha-worker",
+            agent_id=alpha.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 1},
+        )
+        beta.mesh.register_worker(
+            worker_id="beta-worker",
+            agent_id=beta.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 1},
+        )
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_peer(base_url=beta_base_url, trust_tier="trusted")
+        server.server_context["mesh"] = alpha.mesh
+        probe = ProbeHandler()
+
+        probe._handle_mesh_cooperative_task_launch(
+            {
+                "name": "probe-group",
+                "request_id": "probe-group-1",
+                "target_peer_ids": ["alpha-node", "beta-node"],
+                "base_job": {
+                    "kind": "shell.command",
+                    "dispatch_mode": "queued",
+                    "requirements": {"capabilities": ["shell"]},
+                    "policy": {"classification": "trusted", "mode": "batch"},
+                    "payload": {"command": [sys.executable, "-c", "print('probe')"]},
+                    "artifact_inputs": [],
+                },
+                "shards": [
+                    {"label": "local", "payload": {"command": [sys.executable, "-c", "print('probe-local')"]}},
+                    {"label": "remote", "payload": {"command": [sys.executable, "-c", "print('probe-remote')"]}},
+                ],
+            }
+        )
+        self.assertEqual(probe.code, 200)
+        task_id = probe.payload["id"]
+
+        probe = ProbeHandler()
+        probe._handle_mesh_cooperative_tasks({"limit": ["10"], "state": [""]})
+        self.assertEqual(probe.code, 200)
+        self.assertEqual(probe.payload["count"], 1)
+
+        probe = ProbeHandler()
+        probe._handle_mesh_cooperative_task_get(f"/mesh/cooperative-tasks/{task_id}")
+        self.assertEqual(probe.code, 200)
+        self.assertEqual(probe.payload["id"], task_id)
 
     def test_server_mesh_secret_handlers_store_and_list_redacted_metadata(self):
         alpha = self.make_stack("alpha")
@@ -4021,6 +4920,766 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(probe.code, 200)
         self.assertEqual(probe.payload["count"], 1)
         self.assertEqual(probe.payload["decisions"][0]["request_id"], "server-handler-decision")
+
+    # ------------------------------------------------------------------
+    # GPU modeling + helper enlistment + GPU-aware cooperative tests
+    # ------------------------------------------------------------------
+    def test_device_profile_normalises_gpu_compute_and_helper_state(self):
+        alpha = self.make_stack(
+            "alpha-gpu",
+            device_profile={
+                "device_class": "full",
+                "execution_tier": "heavy",
+                "compute_profile": {
+                    "cpu_cores": 32,
+                    "memory_mb": 131072,
+                    "gpu_count": 2,
+                    "gpu_class": "cuda",
+                    "gpu_vram_mb": 24576,
+                    "supports_workload_classes": ["gpu_training", "mixed"],
+                },
+                "helper_state": "active",
+                "helper_role": "helper",
+            },
+        )
+        profile = alpha.mesh.device_profile
+        compute = profile.get("compute_profile") or {}
+        self.assertTrue(compute.get("gpu_capable"))
+        self.assertEqual(compute.get("gpu_class"), "cuda")
+        self.assertIn("gpu_training", compute.get("supports_workload_classes") or [])
+        self.assertIn("gpu", compute.get("compute_tags") or [])
+        self.assertIn("large_gpu", compute.get("compute_tags") or [])
+        self.assertEqual(profile.get("helper_state"), "active")
+        cards = alpha.mesh.capability_cards()
+        names = {card.get("name") for card in cards}
+        self.assertIn("gpu-runtime", names)
+        self.assertIn("helper-enlistment", names)
+        gpu_card = next(card for card in cards if card.get("name") == "gpu-runtime")
+        self.assertTrue(gpu_card.get("available"))
+        self.assertEqual(gpu_card.get("metadata", {}).get("gpu_count"), 2)
+
+    def test_device_profile_normalises_offload_policy(self):
+        alpha = self.make_stack(
+            "alpha-policy",
+            device_profile={
+                "device_class": "full",
+                "offload_policy": {
+                    "enabled": True,
+                    "mode": "auto",
+                    "pressure_threshold": "saturated",
+                    "max_auto_enlist": 3,
+                    "allowed_trust_tiers": ["trusted"],
+                    "allowed_device_classes": ["full", "relay"],
+                    "approval_for_gpu_helpers": False,
+                },
+            },
+        )
+        policy = dict(alpha.mesh.device_profile.get("offload_policy") or {})
+        self.assertTrue(policy.get("enabled"))
+        self.assertEqual(policy.get("mode"), "auto")
+        self.assertEqual(policy.get("pressure_threshold"), "saturated")
+        self.assertEqual(policy.get("max_auto_enlist"), 3)
+        self.assertEqual(policy.get("allowed_trust_tiers"), ["trusted"])
+        self.assertFalse(policy.get("approval_for_gpu_helpers"))
+
+    def test_offload_preference_persists_by_peer_and_workload(self):
+        alpha = self.make_stack("alpha-pref")
+        beta = self.make_stack("beta-pref")
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_peer(base_url=beta_base_url, trust_tier="trusted")
+        alpha.mesh.sync_peer("beta-pref-node", limit=20, refresh_manifest=True)
+
+        stored = alpha.mesh.set_offload_preference(
+            "beta-pref-node",
+            workload_class="gpu_inference",
+            preference="prefer",
+            source="operator",
+            metadata={"note": "always use this GPU box"},
+        )
+
+        self.assertEqual(stored["peer_id"], "beta-pref-node")
+        self.assertEqual(stored["workload_class"], "gpu_inference")
+        self.assertEqual(stored["preference"], "prefer")
+        listed = alpha.mesh.list_offload_preferences(workload_class="gpu_inference")
+        self.assertEqual(listed["count"], 1)
+        self.assertEqual(listed["preferences"][0]["metadata"]["note"], "always use this GPU box")
+
+    def test_scheduler_requires_gpu_when_job_declares_gpu_required(self):
+        alpha = self.make_stack("alpha-ctl")
+        cpu_peer = self.make_stack(
+            "beta-cpu",
+            device_profile={
+                "device_class": "full",
+                "execution_tier": "heavy",
+                "compute_profile": {"cpu_cores": 16, "memory_mb": 32768},
+            },
+        )
+        gpu_peer = self.make_stack(
+            "gamma-gpu",
+            device_profile={
+                "device_class": "full",
+                "execution_tier": "heavy",
+                "compute_profile": {
+                    "cpu_cores": 32,
+                    "memory_mb": 65536,
+                    "gpu_count": 1,
+                    "gpu_class": "cuda",
+                    "gpu_vram_mb": 16384,
+                },
+            },
+        )
+        cpu_peer.mesh.register_worker(
+            worker_id="beta-worker",
+            agent_id=cpu_peer.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 4},
+        )
+        gpu_peer.mesh.register_worker(
+            worker_id="gamma-worker",
+            agent_id=gpu_peer.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 4},
+        )
+        _, beta_base_url = self.serve_mesh(cpu_peer)
+        _, gamma_base_url = self.serve_mesh(gpu_peer)
+        alpha.mesh.connect_peer(base_url=beta_base_url, trust_tier="trusted")
+        alpha.mesh.connect_peer(base_url=gamma_base_url, trust_tier="trusted")
+        alpha.mesh.sync_peer("beta-cpu-node", limit=20, refresh_manifest=True)
+        alpha.mesh.sync_peer("gamma-gpu-node", limit=20, refresh_manifest=True)
+
+        decision = alpha.mesh.select_execution_target(
+            {
+                "kind": "shell.command",
+                "requirements": {"capabilities": ["shell"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "dispatch_mode": "queued",
+                "placement": {
+                    "workload_class": "gpu_inference",
+                    "gpu_required": True,
+                    "min_gpu_vram_mb": 8192,
+                },
+                "payload": {"command": [sys.executable, "-c", "print('gpu')"]},
+                "artifact_inputs": [],
+            },
+            allow_local=False,
+        )
+        self.assertEqual(decision["status"], "placed")
+        self.assertEqual(decision["selected"]["peer_id"], "gamma-gpu-node")
+        cpu_candidate = next(
+            item for item in decision["candidates"] if item["peer_id"] == "beta-cpu-node"
+        )
+        self.assertIn("gpu_required_not_available", cpu_candidate["reasons"])
+
+    def test_helper_enlistment_lifecycle_persists_state(self):
+        alpha = self.make_stack("alpha-hub")
+        beta = self.make_stack(
+            "beta-helper",
+            device_profile={
+                "device_class": "full",
+                "execution_tier": "heavy",
+                "compute_profile": {
+                    "cpu_cores": 16,
+                    "memory_mb": 32768,
+                    "gpu_count": 1,
+                    "gpu_class": "cuda",
+                    "gpu_vram_mb": 16384,
+                },
+            },
+        )
+        beta.mesh.register_worker(
+            worker_id="beta-worker",
+            agent_id=beta.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 4},
+        )
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_peer(base_url=beta_base_url, trust_tier="trusted")
+        alpha.mesh.sync_peer("beta-helper-node", limit=20, refresh_manifest=True)
+
+        helpers_before = alpha.mesh.list_helpers()
+        self.assertEqual(helpers_before["count"], 1)
+        self.assertEqual(helpers_before["helpers"][0]["state"], "unenlisted")
+
+        enlisted = alpha.mesh.enlist_helper(
+            "beta-helper-node", mode="on_demand", role="gpu_helper", reason="test_enlist"
+        )
+        self.assertEqual(enlisted["state"], "enlisted")
+        self.assertEqual(enlisted["role"], "gpu_helper")
+        self.assertEqual(enlisted["mode"], "on_demand")
+
+        drained = alpha.mesh.drain_helper("beta-helper-node", drain_reason="test_drain")
+        self.assertEqual(drained["state"], "draining")
+        self.assertEqual(drained["drain_reason"], "test_drain")
+
+        retired = alpha.mesh.retire_helper("beta-helper-node", reason="test_retire")
+        self.assertEqual(retired["state"], "unenlisted")
+        self.assertEqual(retired["mode"], "idle")
+
+        history = retired["history"]
+        self.assertGreaterEqual(len(history), 3)
+        self.assertEqual(history[0]["reason"], "test_enlist")
+        self.assertEqual(history[-1]["reason"], "test_retire")
+
+    def test_mesh_pressure_flags_saturation_with_no_workers(self):
+        alpha = self.make_stack("alpha-pressure")
+        alpha.mesh.register_worker(
+            worker_id="alpha-pressure-worker",
+            agent_id=alpha.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 1},
+            status="busy",
+        )
+        alpha.mesh.schedule_job(
+            {
+                "kind": "shell.command",
+                "requirements": {"capabilities": ["shell"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "dispatch_mode": "queued",
+                "placement": {"queue_class": "batch"},
+                "payload": {"command": [sys.executable, "-c", "print('pressure')"]},
+                "artifact_inputs": [],
+            },
+            request_id="pressure-request",
+        )
+        pressure = alpha.mesh.mesh_pressure()
+        self.assertEqual(pressure["pressure"], "saturated")
+        self.assertGreaterEqual(pressure["queued"], 1)
+        self.assertTrue(pressure["needs_help"])
+        self.assertIn("queue_saturated", pressure["reasons"])
+
+    def test_plan_helper_enlistment_prefers_gpu_peer_for_gpu_workload(self):
+        alpha = self.make_stack("alpha-plan")
+        cpu_peer = self.make_stack(
+            "beta-cpu2",
+            device_profile={
+                "device_class": "full",
+                "execution_tier": "heavy",
+                "compute_profile": {"cpu_cores": 8, "memory_mb": 16384},
+            },
+        )
+        gpu_peer = self.make_stack(
+            "gamma-gpu2",
+            device_profile={
+                "device_class": "full",
+                "execution_tier": "heavy",
+                "compute_profile": {
+                    "cpu_cores": 16,
+                    "memory_mb": 32768,
+                    "gpu_count": 1,
+                    "gpu_class": "cuda",
+                    "gpu_vram_mb": 24576,
+                },
+            },
+        )
+        cpu_peer.mesh.register_worker(
+            worker_id="beta-w2", agent_id=cpu_peer.agent_id,
+            capabilities=["worker-runtime", "shell"], resources={"cpu": 2},
+        )
+        gpu_peer.mesh.register_worker(
+            worker_id="gamma-w2", agent_id=gpu_peer.agent_id,
+            capabilities=["worker-runtime", "shell"], resources={"cpu": 2},
+        )
+        _, cpu_base_url = self.serve_mesh(cpu_peer)
+        _, gpu_base_url = self.serve_mesh(gpu_peer)
+        alpha.mesh.connect_peer(base_url=cpu_base_url, trust_tier="trusted")
+        alpha.mesh.connect_peer(base_url=gpu_base_url, trust_tier="trusted")
+        alpha.mesh.sync_peer("beta-cpu2-node", limit=20, refresh_manifest=True)
+        alpha.mesh.sync_peer("gamma-gpu2-node", limit=20, refresh_manifest=True)
+
+        plan = alpha.mesh.plan_helper_enlistment(
+            job={
+                "kind": "shell.command",
+                "requirements": {"capabilities": ["shell"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "dispatch_mode": "queued",
+                "placement": {
+                    "workload_class": "gpu_training",
+                    "gpu_required": True,
+                    "min_gpu_vram_mb": 16384,
+                },
+                "payload": {"command": [sys.executable, "-c", "print('plan')"]},
+                "artifact_inputs": [],
+            },
+        )
+        self.assertGreaterEqual(plan["candidate_count"], 1)
+        self.assertEqual(plan["candidates"][0]["peer_id"], "gamma-gpu2-node")
+        self.assertIn("gpu_capable", plan["candidates"][0]["reasons"])
+
+    def test_run_autonomous_offload_auto_enlists_trusted_helper(self):
+        alpha = self.make_stack("alpha-auto")
+        alpha.mesh.update_device_profile(
+            {
+                "offload_policy": {
+                    "enabled": True,
+                    "mode": "auto",
+                    "pressure_threshold": "elevated",
+                    "max_auto_enlist": 1,
+                    "allowed_trust_tiers": ["trusted"],
+                    "allowed_device_classes": ["full"],
+                    "approval_trust_tiers": [],
+                    "approval_device_classes": [],
+                    "approval_for_gpu_helpers": False,
+                }
+            }
+        )
+        alpha.mesh.register_worker(
+            worker_id="alpha-auto-worker",
+            agent_id=alpha.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 1},
+            status="busy",
+        )
+        beta = self.make_stack("beta-auto")
+        beta.mesh.register_worker(
+            worker_id="beta-auto-worker",
+            agent_id=beta.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 2},
+        )
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_peer(base_url=beta_base_url, trust_tier="trusted")
+        alpha.mesh.sync_peer("beta-auto-node", limit=20, refresh_manifest=True)
+        alpha.mesh.schedule_job(
+            {
+                "kind": "shell.command",
+                "requirements": {"capabilities": ["shell"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "dispatch_mode": "queued",
+                "placement": {"queue_class": "batch"},
+                "payload": {"command": [sys.executable, "-c", "print('auto')"]},
+                "artifact_inputs": [],
+            },
+            request_id="auto-offload-job",
+        )
+
+        result = alpha.mesh.run_autonomous_offload(actor_agent_id="test-autonomy")
+
+        self.assertEqual(result["status"], "auto_enlisted")
+        self.assertEqual(len(result["auto_seek"]["enlisted"]), 1)
+        helpers = alpha.mesh.list_helpers()
+        helper = next(item for item in helpers["helpers"] if item["peer_id"] == "beta-auto-node")
+        self.assertEqual(helper["state"], "enlisted")
+
+    def test_run_autonomous_offload_requests_approval_and_applies_on_approve(self):
+        alpha = self.make_stack("alpha-approval")
+        alpha.mesh.update_device_profile(
+            {
+                "offload_policy": {
+                    "enabled": True,
+                    "mode": "auto",
+                    "pressure_threshold": "elevated",
+                    "max_auto_enlist": 1,
+                    "allowed_trust_tiers": ["trusted", "partner"],
+                    "allowed_device_classes": ["full"],
+                    "approval_trust_tiers": ["partner"],
+                    "approval_device_classes": [],
+                    "approval_for_gpu_helpers": False,
+                }
+            }
+        )
+        alpha.mesh.register_worker(
+            worker_id="alpha-approval-worker",
+            agent_id=alpha.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 1},
+            status="busy",
+        )
+        beta = self.make_stack("beta-approval")
+        beta.mesh.register_worker(
+            worker_id="beta-approval-worker",
+            agent_id=beta.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 2},
+        )
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_peer(base_url=beta_base_url, trust_tier="partner")
+        alpha.mesh.sync_peer("beta-approval-node", limit=20, refresh_manifest=True)
+        alpha.mesh.schedule_job(
+            {
+                "kind": "shell.command",
+                "requirements": {"capabilities": ["shell"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "dispatch_mode": "queued",
+                "placement": {"queue_class": "batch"},
+                "payload": {"command": [sys.executable, "-c", "print('approval')"]},
+                "artifact_inputs": [],
+            },
+            request_id="approval-offload-job",
+        )
+
+        result = alpha.mesh.run_autonomous_offload(actor_agent_id="test-autonomy")
+
+        self.assertEqual(result["status"], "approval_requested")
+        approval = result["approval"]["approval"]
+        self.assertEqual(approval["status"], "pending")
+
+        resolved = alpha.mesh.resolve_approval(
+            approval["id"],
+            decision="approved",
+            operator_peer_id=alpha.mesh.node_id,
+            operator_agent_id="test-ui",
+            reason="approve_offload",
+        )
+        self.assertEqual(resolved["status"], "approved")
+        self.assertEqual(resolved["automation"]["status"], "applied")
+        helpers = alpha.mesh.list_helpers()
+        helper = next(item for item in helpers["helpers"] if item["peer_id"] == "beta-approval-node")
+        self.assertEqual(helper["state"], "enlisted")
+        prefs = alpha.mesh.list_offload_preferences(peer_id="beta-approval-node", workload_class="default")
+        self.assertEqual(prefs["preferences"][0]["preference"], "allow")
+
+    def test_autonomous_offload_respects_workload_policy_and_preferences(self):
+        alpha = self.make_stack("alpha-pref-policy")
+        alpha.mesh.update_device_profile(
+            {
+                "offload_policy": {
+                    "enabled": True,
+                    "mode": "auto",
+                    "pressure_threshold": "elevated",
+                    "max_auto_enlist": 2,
+                    "allowed_trust_tiers": ["trusted"],
+                    "allowed_device_classes": ["full"],
+                    "allowed_workload_classes": ["gpu_inference"],
+                    "approval_workload_classes": ["gpu_training"],
+                    "approval_trust_tiers": [],
+                    "approval_device_classes": [],
+                    "approval_for_gpu_helpers": False,
+                }
+            }
+        )
+        alpha.mesh.register_worker(
+            worker_id="alpha-pref-policy-worker",
+            agent_id=alpha.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 1},
+            status="busy",
+        )
+        beta = self.make_stack(
+            "beta-pref-policy",
+            device_profile={
+                "device_class": "full",
+                "execution_tier": "heavy",
+                "compute_profile": {
+                    "cpu_cores": 16,
+                    "memory_mb": 32768,
+                    "gpu_count": 1,
+                    "gpu_class": "cuda",
+                    "gpu_vram_mb": 24576,
+                },
+            },
+        )
+        beta.mesh.register_worker(
+            worker_id="beta-pref-policy-worker",
+            agent_id=beta.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 2},
+        )
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_peer(base_url=beta_base_url, trust_tier="trusted")
+        alpha.mesh.sync_peer("beta-pref-policy-node", limit=20, refresh_manifest=True)
+        alpha.mesh.schedule_job(
+            {
+                "kind": "shell.command",
+                "requirements": {"capabilities": ["shell"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "dispatch_mode": "queued",
+                "placement": {"queue_class": "batch"},
+                "payload": {"command": [sys.executable, "-c", "print('pref-policy')"]},
+                "artifact_inputs": [],
+            },
+            request_id="pref-policy-job",
+        )
+        alpha.mesh.set_offload_preference(
+            "beta-pref-policy-node",
+            workload_class="gpu_inference",
+            preference="prefer",
+            source="operator",
+        )
+
+        allowed_eval = alpha.mesh.evaluate_autonomous_offload(
+            job={
+                "kind": "shell.command",
+                "requirements": {"capabilities": ["shell"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "dispatch_mode": "queued",
+                "placement": {"workload_class": "gpu_inference", "gpu_required": True},
+                "payload": {"command": [sys.executable, "-c", "print('gpu')"]},
+                "artifact_inputs": [],
+            }
+        )
+        self.assertEqual(allowed_eval["decision"], "auto_enlist")
+        self.assertEqual(allowed_eval["eligible_candidates"][0]["peer_id"], "beta-pref-policy-node")
+        self.assertIn("preference_prefer", allowed_eval["eligible_candidates"][0]["reasons"])
+
+        blocked_eval = alpha.mesh.evaluate_autonomous_offload(
+            job={
+                "kind": "shell.command",
+                "requirements": {"capabilities": ["shell"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "dispatch_mode": "queued",
+                "placement": {"workload_class": "cpu_bound"},
+                "payload": {"command": [sys.executable, "-c", "print('cpu')"]},
+                "artifact_inputs": [],
+            }
+        )
+        self.assertEqual(blocked_eval["decision"], "noop")
+        self.assertIn("workload_not_allowed_by_policy", blocked_eval["reasons"])
+
+    def test_rejected_autonomous_offload_learns_deny_preference(self):
+        alpha = self.make_stack("alpha-reject")
+        alpha.mesh.update_device_profile(
+            {
+                "offload_policy": {
+                    "enabled": True,
+                    "mode": "auto",
+                    "pressure_threshold": "elevated",
+                    "max_auto_enlist": 1,
+                    "allowed_trust_tiers": ["trusted", "partner"],
+                    "allowed_device_classes": ["full"],
+                    "approval_trust_tiers": ["partner"],
+                    "approval_device_classes": [],
+                    "approval_for_gpu_helpers": False,
+                }
+            }
+        )
+        alpha.mesh.register_worker(
+            worker_id="alpha-reject-worker",
+            agent_id=alpha.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 1},
+            status="busy",
+        )
+        beta = self.make_stack("beta-reject")
+        beta.mesh.register_worker(
+            worker_id="beta-reject-worker",
+            agent_id=beta.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 2},
+        )
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_peer(base_url=beta_base_url, trust_tier="partner")
+        alpha.mesh.sync_peer("beta-reject-node", limit=20, refresh_manifest=True)
+        alpha.mesh.schedule_job(
+            {
+                "kind": "shell.command",
+                "requirements": {"capabilities": ["shell"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "dispatch_mode": "queued",
+                "placement": {"queue_class": "batch"},
+                "payload": {"command": [sys.executable, "-c", "print('reject')"]},
+                "artifact_inputs": [],
+            },
+            request_id="reject-offload-job",
+        )
+
+        result = alpha.mesh.run_autonomous_offload(actor_agent_id="test-autonomy")
+        approval = result["approval"]["approval"]
+        rejected = alpha.mesh.resolve_approval(
+            approval["id"],
+            decision="rejected",
+            operator_peer_id=alpha.mesh.node_id,
+            operator_agent_id="test-ui",
+            reason="reject_offload",
+        )
+        self.assertEqual(rejected["status"], "rejected")
+        self.assertEqual(rejected["automation"]["preference"], "deny")
+        prefs = alpha.mesh.list_offload_preferences(peer_id="beta-reject-node", workload_class="default")
+        self.assertEqual(prefs["preferences"][0]["preference"], "deny")
+
+    def test_cooperative_task_places_gpu_shard_on_gpu_helper(self):
+        alpha = self.make_stack("alpha-coop")
+        alpha.mesh.register_worker(
+            worker_id="alpha-coop-worker",
+            agent_id=alpha.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 2},
+        )
+        cpu_peer = self.make_stack(
+            "beta-coop-cpu",
+            device_profile={
+                "device_class": "full",
+                "execution_tier": "heavy",
+                "compute_profile": {"cpu_cores": 16, "memory_mb": 32768},
+            },
+        )
+        gpu_peer = self.make_stack(
+            "gamma-coop-gpu",
+            device_profile={
+                "device_class": "full",
+                "execution_tier": "heavy",
+                "compute_profile": {
+                    "cpu_cores": 16,
+                    "memory_mb": 65536,
+                    "gpu_count": 2,
+                    "gpu_class": "cuda",
+                    "gpu_vram_mb": 24576,
+                },
+            },
+        )
+        cpu_peer.mesh.register_worker(
+            worker_id="beta-coop-w",
+            agent_id=cpu_peer.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 2},
+        )
+        gpu_peer.mesh.register_worker(
+            worker_id="gamma-coop-w",
+            agent_id=gpu_peer.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 2},
+        )
+        _, cpu_base_url = self.serve_mesh(cpu_peer)
+        _, gpu_base_url = self.serve_mesh(gpu_peer)
+        alpha.mesh.connect_peer(base_url=cpu_base_url, trust_tier="trusted")
+        alpha.mesh.connect_peer(base_url=gpu_base_url, trust_tier="trusted")
+        alpha.mesh.sync_peer("beta-coop-cpu-node", limit=20, refresh_manifest=True)
+        alpha.mesh.sync_peer("gamma-coop-gpu-node", limit=20, refresh_manifest=True)
+
+        task = alpha.mesh.launch_cooperative_task(
+            name="gpu-aware",
+            request_id="gpu-aware-coop-1",
+            strategy="gpu-aware",
+            target_peer_ids=["alpha-coop-node", "beta-coop-cpu-node", "gamma-coop-gpu-node"],
+            base_job={
+                "kind": "shell.command",
+                "dispatch_mode": "queued",
+                "requirements": {"capabilities": ["shell"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "payload": {"command": [sys.executable, "-c", "print('coop')"]},
+                "artifact_inputs": [],
+            },
+            shards=[
+                {
+                    "label": "gpu-shard",
+                    "placement": {
+                        "workload_class": "gpu_inference",
+                        "gpu_required": True,
+                        "min_gpu_vram_mb": 8192,
+                    },
+                    "payload": {"command": [sys.executable, "-c", "print('gpu')"]},
+                },
+                {
+                    "label": "cpu-shard",
+                    "placement": {"workload_class": "cpu_bound"},
+                    "payload": {"command": [sys.executable, "-c", "print('cpu')"]},
+                },
+            ],
+        )
+        shards_by_label = {child["label"]: child for child in task["children"]}
+        self.assertEqual(shards_by_label["gpu-shard"]["peer_id"], "gamma-coop-gpu-node")
+        self.assertTrue(shards_by_label["gpu-shard"]["placement"]["target_gpu_capable"])
+        self.assertNotEqual(shards_by_label["cpu-shard"]["peer_id"], "gamma-coop-gpu-node")
+
+    def test_server_helpers_endpoints_round_trip_enlistment(self):
+        alpha = self.make_stack("alpha-srv-helpers")
+        beta = self.make_stack("beta-srv-helpers")
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_peer(base_url=beta_base_url, trust_tier="trusted")
+        alpha.mesh.sync_peer("beta-srv-helpers-node", limit=20, refresh_manifest=True)
+        server.server_context["mesh"] = alpha.mesh
+
+        probe = ProbeHandler()
+        probe._handle_mesh_helpers({"limit": ["10"]})
+        self.assertEqual(probe.code, 200)
+        self.assertGreaterEqual(probe.payload["count"], 1)
+
+        enlist_probe = ProbeHandler()
+        enlist_probe._handle_mesh_helpers_enlist({"peer_id": "beta-srv-helpers-node", "role": "helper"})
+        self.assertEqual(enlist_probe.code, 200)
+        self.assertEqual(enlist_probe.payload["state"], "enlisted")
+
+        pressure_probe = ProbeHandler()
+        pressure_probe._handle_mesh_pressure()
+        self.assertEqual(pressure_probe.code, 200)
+        self.assertIn("pressure", pressure_probe.payload)
+
+        retire_probe = ProbeHandler()
+        retire_probe._handle_mesh_helpers_retire({"peer_id": "beta-srv-helpers-node"})
+        self.assertEqual(retire_probe.code, 200)
+        self.assertEqual(retire_probe.payload["state"], "unenlisted")
+
+    def test_server_helpers_autonomy_endpoints_round_trip(self):
+        alpha = self.make_stack("alpha-srv-auto")
+        alpha.mesh.update_device_profile(
+            {
+                "offload_policy": {
+                    "enabled": True,
+                    "mode": "auto",
+                    "pressure_threshold": "elevated",
+                    "max_auto_enlist": 1,
+                    "allowed_trust_tiers": ["trusted"],
+                    "allowed_device_classes": ["full"],
+                    "approval_trust_tiers": [],
+                    "approval_device_classes": [],
+                    "approval_for_gpu_helpers": False,
+                }
+            }
+        )
+        alpha.mesh.register_worker(
+            worker_id="alpha-srv-auto-worker",
+            agent_id=alpha.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 1},
+            status="busy",
+        )
+        beta = self.make_stack("beta-srv-auto")
+        beta.mesh.register_worker(
+            worker_id="beta-srv-auto-worker",
+            agent_id=beta.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 2},
+        )
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_peer(base_url=beta_base_url, trust_tier="trusted")
+        alpha.mesh.sync_peer("beta-srv-auto-node", limit=20, refresh_manifest=True)
+        alpha.mesh.schedule_job(
+            {
+                "kind": "shell.command",
+                "requirements": {"capabilities": ["shell"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "dispatch_mode": "queued",
+                "placement": {"queue_class": "batch"},
+                "payload": {"command": [sys.executable, "-c", "print('srv-auto')"]},
+                "artifact_inputs": [],
+            },
+            request_id="srv-auto-job",
+        )
+        server.server_context["mesh"] = alpha.mesh
+
+        eval_probe = ProbeHandler()
+        eval_probe._handle_mesh_helpers_autonomy()
+        self.assertEqual(eval_probe.code, 200)
+        self.assertIn(eval_probe.payload["decision"], {"auto_enlist", "request_approval", "suggest", "noop"})
+
+        run_probe = ProbeHandler()
+        run_probe._handle_mesh_helpers_autonomy_run({"actor_agent_id": "test-ui"})
+        self.assertEqual(run_probe.code, 200)
+        self.assertEqual(run_probe.payload["status"], "auto_enlisted")
+
+    def test_server_helper_preferences_endpoints_round_trip(self):
+        alpha = self.make_stack("alpha-srv-pref")
+        beta = self.make_stack("beta-srv-pref")
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_peer(base_url=beta_base_url, trust_tier="trusted")
+        alpha.mesh.sync_peer("beta-srv-pref-node", limit=20, refresh_manifest=True)
+        server.server_context["mesh"] = alpha.mesh
+
+        set_probe = ProbeHandler()
+        set_probe._handle_mesh_helpers_preferences_set(
+            {
+                "peer_id": "beta-srv-pref-node",
+                "workload_class": "gpu_inference",
+                "preference": "prefer",
+                "source": "operator",
+            }
+        )
+        self.assertEqual(set_probe.code, 200)
+        self.assertEqual(set_probe.payload["preference"], "prefer")
+
+        list_probe = ProbeHandler()
+        list_probe._handle_mesh_helpers_preferences({"limit": ["10"], "workload_class": ["gpu_inference"]})
+        self.assertEqual(list_probe.code, 200)
+        self.assertEqual(list_probe.payload["count"], 1)
 
 
 if __name__ == "__main__":
