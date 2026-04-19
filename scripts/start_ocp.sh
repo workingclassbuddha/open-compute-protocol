@@ -57,6 +57,11 @@ db_path="${OCP_DB_PATH:-$state_dir/ocp.db}"
 identity_dir="${OCP_IDENTITY_DIR:-$state_dir/identity}"
 workspace_root="${OCP_WORKSPACE_ROOT:-$state_dir/workspace}"
 
+display_host="$host"
+if [[ "$display_host" == "0.0.0.0" || "$display_host" == "::" ]]; then
+  display_host="127.0.0.1"
+fi
+
 mkdir -p "$state_dir" "$identity_dir" "$workspace_root"
 
 cat <<EOF
@@ -73,9 +78,21 @@ Starting The Open Compute Protocol
   identity:     $identity_dir
   workspace:    $workspace_root
 
-Control deck:
-  http://$host:$port/control
+Easy setup:
+  http://$display_host:$port/
+
+Advanced control deck:
+  http://$display_host:$port/control
 EOF
+
+if [[ "$host" == "0.0.0.0" || "$host" == "::" ]]; then
+  cat <<EOF
+
+Other computers on your network:
+  use this machine's LAN IP with port $port
+  example: http://192.168.1.44:$port/
+EOF
+fi
 
 exec python3 "$repo_root/server.py" \
   --host "$host" \

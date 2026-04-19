@@ -23,7 +23,7 @@ import sys
 import uuid
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 from .crypto import SIGNATURE_SCHEME, generate_keypair, sign_message, verify_message
@@ -112,6 +112,83 @@ def _normalize_trust_tier(value: Optional[str]) -> str:
     if token in {"self", "trusted", "partner", "market", "public", "blocked"}:
         return token
     return "trusted"
+
+
+def _is_wildcard_host(host: str) -> bool:
+    token = str(host or "").strip().lower()
+    return token in {"", "0.0.0.0", "::", "[::]"}
+
+
+def _is_loopback_host(host: str) -> bool:
+    token = str(host or "").strip().lower()
+    if token == "localhost":
+        return True
+    return token.startswith("127.")
+
+
+def _is_wildcard_or_loopback_host(host: str) -> bool:
+    return _is_wildcard_host(host) or _is_loopback_host(host)
+
+
+def _normalize_base_url(url: str, *, fallback_url: str = "", replace_loopback: bool = False) -> str:
+    token = str(url or "").strip().rstrip("/")
+    fallback = str(fallback_url or "").strip().rstrip("/")
+    if not token:
+        return fallback
+    parsed = urlparse(token)
+    host = parsed.hostname or ""
+    if _is_wildcard_host(host) and fallback:
+        return fallback
+    if replace_loopback and _is_loopback_host(host) and fallback:
+        return fallback
+    return token
+
+
+def _discover_local_ipv4_addresses(*, bind_host: str = "") -> list[str]:
+    seen: set[str] = set()
+    bind_token = str(bind_host or "").strip()
+    if bind_token and not _is_wildcard_or_loopback_host(bind_token):
+        try:
+            if ipaddress.ip_address(bind_token).version == 4:
+                seen.add(bind_token)
+        except ValueError:
+            pass
+    for family, _, _, _, sockaddr in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET, socket.SOCK_DGRAM):
+        if family != socket.AF_INET or not sockaddr:
+            continue
+        host = str(sockaddr[0] or "").strip()
+        if host and not _is_wildcard_or_loopback_host(host):
+            seen.add(host)
+    for probe_host in ("192.0.2.1", "10.255.255.255"):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.connect((probe_host, 80))
+                host = str(sock.getsockname()[0] or "").strip()
+                if host and not _is_wildcard_or_loopback_host(host):
+                    seen.add(host)
+        except OSError:
+            continue
+    ordered = sorted(
+        (
+            host
+            for host in seen
+            if host
+            and not _is_wildcard_or_loopback_host(host)
+            and ipaddress.ip_address(host).version == 4
+        ),
+        key=lambda host: (not ipaddress.ip_address(host).is_private, host),
+    )
+    return ordered
+
+
+def _preferred_local_base_url(*, bind_host: str = "", port: int = 8421, scheme: str = "http") -> str:
+    host_token = str(bind_host or "").strip()
+    if host_token and not _is_wildcard_or_loopback_host(host_token):
+        return f"{scheme}://{host_token}:{int(port)}"
+    addresses = _discover_local_ipv4_addresses(bind_host=bind_host)
+    if addresses:
+        return f"{scheme}://{addresses[0]}:{int(port)}"
+    return f"{scheme}://127.0.0.1:{int(port)}"
 
 
 ARTIFACT_RETENTION_DEFAULTS = {
@@ -981,6 +1058,18 @@ class MeshPeerClient:
     def seek_peers(self, payload: dict) -> dict:
         return self._request_json("POST", "/mesh/discovery/seek", payload=payload)
 
+    def scan_local_peers(self, payload: Optional[dict] = None) -> dict:
+        return self._request_json("POST", "/mesh/discovery/scan-local", payload=payload or {})
+
+    def connectivity_diagnostics(self) -> dict:
+        return self._request_json("GET", "/mesh/connectivity/diagnostics")
+
+    def connect_peer(self, payload: dict) -> dict:
+        return self._request_json("POST", "/mesh/peers/connect", payload=payload)
+
+    def connect_all_peers(self, payload: Optional[dict] = None) -> dict:
+        return self._request_json("POST", "/mesh/peers/connect-all", payload=payload or {})
+
     def mesh_pressure(self) -> dict:
         return self._request_json("GET", "/mesh/pressure")
 
@@ -1044,6 +1133,9 @@ class MeshPeerClient:
 
     def launch_mission(self, payload: dict) -> dict:
         return self._request_json("POST", "/mesh/missions/launch", payload=payload)
+
+    def launch_test_mission(self, payload: dict) -> dict:
+        return self._request_json("POST", "/mesh/missions/test-launch", payload=payload)
 
     def cancel_mission(self, mission_id: str, *, reason: str = "mission_cancelled", operator_id: str = "") -> dict:
         payload = {"reason": reason}
@@ -2520,14 +2612,22 @@ class SovereignMesh:
         return self._row_to_peer(row)
 
     def get_manifest(self) -> dict:
+        parsed_base = urlparse(self.base_url)
+        advertised_base_url = _normalize_base_url(
+            self.base_url,
+            fallback_url=_preferred_local_base_url(
+                bind_host=parsed_base.hostname or "",
+                port=int(parsed_base.port or 8421),
+            ),
+        )
         card = OrganismCard(
             organism_id=self.node_id,
             node_id=self.node_id,
             display_name=self.display_name,
             public_key=self.public_key,
             signature_scheme=SIGNATURE_SCHEME,
-            endpoint_url=self.base_url,
-            stream_url=f"{self.base_url}/mesh/stream",
+            endpoint_url=advertised_base_url,
+            stream_url=f"{advertised_base_url}/mesh/stream",
             protocol_version=PROTOCOL_VERSION,
             trust_tier="self",
             reachability="local-first",
@@ -2694,9 +2794,15 @@ class SovereignMesh:
         trust_tier: str = "trusted",
         timeout: float = 8.0,
     ) -> dict:
-        client = MeshPeerClient(base_url, timeout=timeout)
+        normalized_base_url = _normalize_base_url(base_url)
+        client = MeshPeerClient(normalized_base_url, timeout=timeout)
         remote_manifest = client.manifest()
         remote_card = dict(remote_manifest.get("organism_card") or {})
+        remote_endpoint_url = _normalize_base_url(
+            remote_card.get("endpoint_url") or "",
+            fallback_url=normalized_base_url,
+            replace_loopback=True,
+        )
         envelope = self.build_signed_envelope(
             "/mesh/handshake",
             {
@@ -2707,7 +2813,7 @@ class SovereignMesh:
         )
         response = client.handshake(envelope)
         self.remember_peer_card(
-            remote_card,
+            {**remote_card, "endpoint_url": remote_endpoint_url, "stream_url": f"{remote_endpoint_url}/mesh/stream"},
             trust_tier=trust_tier,
             mesh_session_id=response.get("mesh_session_id") or "",
             status="connected",
@@ -2728,9 +2834,338 @@ class SovereignMesh:
             "mesh.handshake.sent",
             peer_id=remote_card.get("organism_id") or remote_card.get("node_id") or "",
             request_id=envelope["request"]["request_id"],
-            payload={"base_url": base_url, "trust_tier": _normalize_trust_tier(trust_tier)},
+            payload={"base_url": normalized_base_url, "trust_tier": _normalize_trust_tier(trust_tier)},
         )
         return {"status": "ok", "remote_manifest": remote_manifest, "response": response}
+
+    def _discovery_candidate_by_peer_id(self, peer_id: str) -> Optional[dict]:
+        token = str(peer_id or "").strip()
+        if not token:
+            return None
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM mesh_discovery_candidates
+                WHERE peer_id=?
+                ORDER BY last_seen_at DESC, updated_at DESC
+                LIMIT 1
+                """,
+                (token,),
+            ).fetchone()
+        return self._row_to_discovery_candidate(row)
+
+    def _scan_urls_for_address(self, address: str, *, port: int, limit: int) -> list[str]:
+        ip = ipaddress.ip_address(str(address or "").strip())
+        if ip.version != 4 or ip.is_loopback or ip.is_unspecified:
+            return []
+        urls: list[str] = []
+        seen: set[str] = set()
+        for prefix in (28, 24):
+            network = ipaddress.ip_network(f"{ip}/{prefix}", strict=False)
+            ordered_hosts = sorted(
+                (host for host in network.hosts() if host != ip),
+                key=lambda host: (abs(int(host) - int(ip)), int(host)),
+            )
+            for host in ordered_hosts:
+                url = f"http://{host}:{int(port)}"
+                if url not in seen:
+                    seen.add(url)
+                    urls.append(url)
+                if len(urls) >= max(1, int(limit)):
+                    return urls
+        return urls
+
+    def suggest_local_scan_urls(self, *, port: int = 0, limit: int = 24) -> list[str]:
+        parsed_base = urlparse(self.base_url)
+        resolved_port = int(port or parsed_base.port or 8421)
+        urls: list[str] = []
+        seen: set[str] = set()
+
+        def append(raw_value: str) -> None:
+            token = _normalize_base_url(raw_value).rstrip("/")
+            if not token or token in seen or token == self.base_url.rstrip("/"):
+                return
+            seen.add(token)
+            urls.append(token)
+
+        peer_rows = list(self.list_peers(limit=12).get("peers") or [])
+        for peer in peer_rows:
+            append(peer.get("endpoint_url") or "")
+        candidate_rows = list(self.list_discovery_candidates(limit=12).get("candidates") or [])
+        for candidate in candidate_rows:
+            append(candidate.get("endpoint_url") or candidate.get("base_url") or "")
+        bind_host = parsed_base.hostname or ""
+        for address in _discover_local_ipv4_addresses(bind_host=bind_host):
+            for url in self._scan_urls_for_address(address, port=resolved_port, limit=limit):
+                append(url)
+                if len(urls) >= max(1, int(limit)):
+                    return urls
+        return urls
+
+    def connectivity_diagnostics(self, *, port: int = 0, limit: int = 24) -> dict:
+        parsed_base = urlparse(self.base_url)
+        bind_host = parsed_base.hostname or ""
+        resolved_port = int(port or parsed_base.port or 8421)
+        local_addresses = _discover_local_ipv4_addresses(bind_host=bind_host)
+        candidate_rows = list(self.list_discovery_candidates(limit=8).get("candidates") or [])
+        recent_errors = [
+            {
+                "base_url": candidate.get("base_url") or "",
+                "display_name": candidate.get("display_name") or candidate.get("peer_id") or "",
+                "error": candidate.get("last_error") or "",
+                "last_error_at": candidate.get("last_error_at") or candidate.get("updated_at") or "",
+            }
+            for candidate in candidate_rows
+            if str(candidate.get("last_error") or "").strip()
+        ][:4]
+        return {
+            "status": "ok",
+            "base_url": _normalize_base_url(
+                self.base_url,
+                fallback_url=_preferred_local_base_url(bind_host=bind_host, port=resolved_port),
+            ),
+            "bind_host": bind_host or "127.0.0.1",
+            "port": resolved_port,
+            "local_ipv4": local_addresses,
+            "scan_urls": self.suggest_local_scan_urls(port=resolved_port, limit=limit),
+            "recent_errors": recent_errors,
+        }
+
+    def scan_local_peers(
+        self,
+        *,
+        trust_tier: str = "trusted",
+        timeout: float = 0.8,
+        limit: int = 24,
+        port: int = 0,
+    ) -> dict:
+        resolved_port = int(port or urlparse(self.base_url).port or 8421)
+        suggested_urls = self.suggest_local_scan_urls(port=resolved_port, limit=limit)
+        result = self.seek_peers(
+            base_urls=suggested_urls,
+            port=resolved_port,
+            trust_tier=trust_tier,
+            auto_connect=False,
+            include_self=False,
+            limit=limit,
+            timeout=timeout,
+            refresh_known=True,
+        )
+        result["suggested_urls"] = suggested_urls
+        result["diagnostics"] = self.connectivity_diagnostics(port=resolved_port, limit=limit)
+        return result
+
+    def connect_device(
+        self,
+        *,
+        base_url: str = "",
+        peer_id: str = "",
+        trust_tier: str = "trusted",
+        timeout: float = 3.0,
+        refresh_manifest: bool = True,
+    ) -> dict:
+        peer_token = str(peer_id or "").strip()
+        base_token = _normalize_base_url(base_url)
+        peer = self._row_to_peer(self._get_peer_row(peer_token)) if peer_token else {}
+        if not base_token and peer:
+            base_token = _normalize_base_url(peer.get("endpoint_url") or "")
+        if not base_token and peer_token:
+            candidate = self._discovery_candidate_by_peer_id(peer_token)
+            if candidate:
+                base_token = _normalize_base_url(candidate.get("endpoint_url") or candidate.get("base_url") or "")
+        if not base_token:
+            raise MeshPolicyError("peer base_url is required")
+        connection = self.connect_peer(base_url=base_token, trust_tier=trust_tier, timeout=timeout)
+        remote_manifest = dict(connection.get("remote_manifest") or {})
+        remote_card = dict(remote_manifest.get("organism_card") or {})
+        connected_peer_id = str(remote_card.get("organism_id") or remote_card.get("node_id") or peer_token).strip()
+        sync_result = self.sync_peer(connected_peer_id, base_url=base_token, limit=20, refresh_manifest=refresh_manifest)
+        resolved_peer = self._row_to_peer(self._get_peer_row(connected_peer_id)) or dict(sync_result.get("peer") or {})
+        return {
+            "status": "ok",
+            "peer": resolved_peer,
+            "peer_id": connected_peer_id,
+            "base_url": base_token,
+            "connection": connection,
+            "sync": sync_result,
+        }
+
+    def connect_all_devices(
+        self,
+        *,
+        trust_tier: str = "trusted",
+        timeout: float = 3.0,
+        scan_timeout: float = 0.8,
+        limit: int = 24,
+        port: int = 0,
+        refresh_manifest: bool = True,
+    ) -> dict:
+        scan_result = self.scan_local_peers(
+            trust_tier=trust_tier,
+            timeout=scan_timeout,
+            limit=limit,
+            port=port,
+        )
+        peer_rows = list((self.list_peers(limit=max(limit * 2, 24)) or {}).get("peers") or [])
+        candidate_rows = list((self.list_discovery_candidates(limit=max(limit * 2, 24)) or {}).get("candidates") or [])
+
+        results: list[dict[str, Any]] = []
+        seen_keys: set[str] = set()
+
+        for peer in peer_rows:
+            peer_id = str(peer.get("peer_id") or "").strip()
+            endpoint_url = _normalize_base_url(peer.get("endpoint_url") or "")
+            if not peer_id and not endpoint_url:
+                continue
+            key = f"peer:{peer_id or endpoint_url}"
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            if peer_id == self.node_id:
+                continue
+            results.append(
+                {
+                    "status": "already_connected",
+                    "peer_id": peer_id,
+                    "base_url": endpoint_url,
+                    "peer": dict(peer),
+                }
+            )
+
+        for candidate in candidate_rows:
+            peer_id = str(candidate.get("peer_id") or "").strip()
+            endpoint_url = _normalize_base_url(candidate.get("endpoint_url") or candidate.get("base_url") or "")
+            if not peer_id and not endpoint_url:
+                continue
+            key = f"candidate:{peer_id or endpoint_url}"
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            if peer_id == self.node_id:
+                continue
+            try:
+                connected = self.connect_device(
+                    base_url=endpoint_url,
+                    peer_id=peer_id,
+                    trust_tier=trust_tier,
+                    timeout=timeout,
+                    refresh_manifest=refresh_manifest,
+                )
+                results.append(
+                    {
+                        "status": "connected",
+                        "peer_id": str(connected.get("peer_id") or peer_id).strip(),
+                        "base_url": endpoint_url,
+                        "peer": dict(connected.get("peer") or {}),
+                    }
+                )
+            except Exception as exc:
+                results.append(
+                    {
+                        "status": "error",
+                        "peer_id": peer_id,
+                        "base_url": endpoint_url,
+                        "error": str(exc),
+                    }
+                )
+
+        connected_count = sum(1 for item in results if item.get("status") == "connected")
+        ready_count = sum(1 for item in results if item.get("status") == "already_connected")
+        error_count = sum(1 for item in results if item.get("status") == "error")
+        mesh_peer_snapshot = self.list_peers(limit=max(limit * 2, 24))
+        mesh_peer_ids = [
+            str(peer.get("peer_id") or "").strip()
+            for peer in list(mesh_peer_snapshot.get("peers") or [])
+            if str(peer.get("peer_id") or "").strip()
+        ]
+        return {
+            "status": "ok",
+            "scan": scan_result,
+            "results": results,
+            "connected": connected_count,
+            "already_connected": ready_count,
+            "errors": error_count,
+            "count": len(results),
+            "mesh": {
+                "peer_count": int(mesh_peer_snapshot.get("count") or len(mesh_peer_ids)),
+                "peer_ids": mesh_peer_ids,
+            },
+        }
+
+    def launch_test_mission(
+        self,
+        *,
+        peer_id: str = "",
+        base_url: str = "",
+        trust_tier: str = "trusted",
+        timeout: float = 3.0,
+        request_id: Optional[str] = None,
+    ) -> dict:
+        peer_token = str(peer_id or "").strip()
+        connection: Optional[dict] = None
+        if not peer_token:
+            connection = self.connect_device(
+                base_url=base_url,
+                trust_tier=trust_tier,
+                timeout=timeout,
+                refresh_manifest=True,
+            )
+            peer_token = str(connection.get("peer_id") or "").strip()
+        elif self._get_peer_row(peer_token) is None and str(base_url or "").strip():
+            connection = self.connect_device(
+                peer_id=peer_token,
+                base_url=base_url,
+                trust_tier=trust_tier,
+                timeout=timeout,
+                refresh_manifest=True,
+            )
+            peer_token = str(connection.get("peer_id") or peer_token).strip()
+        if not peer_token:
+            raise MeshPolicyError("test mission target peer is required")
+
+        proof_filename = "ocp_connect_proof.txt"
+        proof_code = (
+            "from pathlib import Path\n"
+            "import tempfile\n"
+            "path = Path(tempfile.gettempdir()) / 'ocp_connect_proof.txt'\n"
+            "path.write_text('mission ran on remote helper\\n')\n"
+            "print(str(path))\n"
+            "print(path.read_text().strip())\n"
+        )
+        mission = self.launch_mission(
+            title="Mesh Test Mission",
+            intent="Verify peer connectivity and remote execution from the Connect Devices control surface.",
+            request_id=(request_id or f"mesh-test-mission-{uuid.uuid4().hex[:12]}").strip(),
+            priority="high",
+            workload_class="connectivity_test",
+            target_strategy="cooperative_spread",
+            continuity={"resumable": True},
+            metadata={"control_flow": "connect_devices", "test_mission": True, "proof_filename": proof_filename},
+            cooperative_task={
+                "name": "mesh-test-remote-proof",
+                "strategy": "spread",
+                "allow_local": False,
+                "allow_remote": True,
+                "target_peer_ids": [peer_token],
+                "base_job": {
+                    "kind": "python.inline",
+                    "dispatch_mode": "inline",
+                    "requirements": {"capabilities": ["python"]},
+                    "policy": {"classification": "trusted", "mode": "batch"},
+                    "payload": {"code": proof_code},
+                    "metadata": {"workload_class": "connectivity_test"},
+                },
+                "shards": [{"label": "remote-proof", "payload": {"code": proof_code}}],
+            },
+        )
+        return {
+            "status": "ok",
+            "peer_id": peer_token,
+            "base_url": _normalize_base_url(base_url) or str(((connection or {}).get("base_url")) or ""),
+            "proof": {"filename": proof_filename, "location_hint": "system temp directory"},
+            "connection": connection or {},
+            "mission": mission,
+        }
 
     def list_remote_events(self, peer_id: str, *, since_remote_seq: int = 0, limit: int = 50) -> list[dict]:
         with self._conn() as conn:
@@ -2826,8 +3261,13 @@ class SovereignMesh:
                 or remote_card.get("device_profile")
                 or {}
             )
+            normalized_endpoint_url = _normalize_base_url(
+                remote_card.get("endpoint_url") or "",
+                fallback_url=_normalize_base_url(base_url or peer.get("endpoint_url") or ""),
+                replace_loopback=True,
+            )
             self.remember_peer_card(
-                remote_card,
+                {**remote_card, "endpoint_url": normalized_endpoint_url, "stream_url": f"{normalized_endpoint_url}/mesh/stream"},
                 trust_tier=peer.get("trust_tier"),
                 mesh_session_id=peer.get("mesh_session_id") or "",
                 status="connected",
@@ -3151,11 +3591,16 @@ class SovereignMesh:
                 manifest = client.manifest()
                 remote_card = dict(manifest.get("organism_card") or {})
                 peer_id = str(remote_card.get("organism_id") or remote_card.get("node_id") or "").strip()
+                endpoint_url = _normalize_base_url(
+                    remote_card.get("endpoint_url") or "",
+                    fallback_url=base_url,
+                    replace_loopback=True,
+                )
                 candidate = self._remember_discovery_candidate(
                     base_url=base_url,
                     peer_id=peer_id,
                     display_name=remote_card.get("display_name") or peer_id,
-                    endpoint_url=remote_card.get("endpoint_url") or base_url,
+                    endpoint_url=endpoint_url,
                     status="discovered",
                     trust_tier=trust_tier,
                     device_profile=manifest.get("device_profile") or remote_card.get("device_profile") or {},
@@ -3189,7 +3634,7 @@ class SovereignMesh:
                         base_url=base_url,
                         peer_id=peer_id,
                         display_name=remote_card.get("display_name") or peer_id,
-                        endpoint_url=remote_card.get("endpoint_url") or base_url,
+                        endpoint_url=endpoint_url,
                         status="connected",
                         trust_tier=trust_tier,
                         device_profile=manifest.get("device_profile") or remote_card.get("device_profile") or {},

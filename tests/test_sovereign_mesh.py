@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
@@ -30,6 +31,12 @@ from mesh import (
     SovereignMesh,
 )
 from runtime import OCPRegistry, OCPStore
+
+START_OCP_EASY = ROOT / "scripts" / "start_ocp_easy.py"
+START_OCP_EASY_SPEC = importlib.util.spec_from_file_location("start_ocp_easy", START_OCP_EASY)
+start_ocp_easy = importlib.util.module_from_spec(START_OCP_EASY_SPEC)
+assert START_OCP_EASY_SPEC and START_OCP_EASY_SPEC.loader
+START_OCP_EASY_SPEC.loader.exec_module(start_ocp_easy)
 
 
 class StubMetabolism:
@@ -78,15 +85,21 @@ class ProbeHandler:
 
 ProbeHandler._mesh = server.OCPHandler._mesh
 ProbeHandler._handle_control_page = server.OCPHandler._handle_control_page
+ProbeHandler._handle_easy_page = server.OCPHandler._handle_easy_page
 ProbeHandler._handle_mesh_manifest = server.OCPHandler._handle_mesh_manifest
 ProbeHandler._handle_mesh_device_profile = server.OCPHandler._handle_mesh_device_profile
 ProbeHandler._handle_mesh_device_profile_update = server.OCPHandler._handle_mesh_device_profile_update
+ProbeHandler._handle_mesh_connectivity_diagnostics = server.OCPHandler._handle_mesh_connectivity_diagnostics
 ProbeHandler._handle_mesh_discovery_candidates = server.OCPHandler._handle_mesh_discovery_candidates
 ProbeHandler._handle_mesh_discovery_seek = server.OCPHandler._handle_mesh_discovery_seek
+ProbeHandler._handle_mesh_discovery_scan_local = server.OCPHandler._handle_mesh_discovery_scan_local
+ProbeHandler._handle_mesh_peers_connect = server.OCPHandler._handle_mesh_peers_connect
+ProbeHandler._handle_mesh_peers_connect_all = server.OCPHandler._handle_mesh_peers_connect_all
 ProbeHandler._handle_mesh_peers_sync = server.OCPHandler._handle_mesh_peers_sync
 ProbeHandler._handle_mesh_missions = server.OCPHandler._handle_mesh_missions
 ProbeHandler._handle_mesh_mission_get = server.OCPHandler._handle_mesh_mission_get
 ProbeHandler._handle_mesh_mission_launch = server.OCPHandler._handle_mesh_mission_launch
+ProbeHandler._handle_mesh_mission_test_launch = server.OCPHandler._handle_mesh_mission_test_launch
 ProbeHandler._handle_mesh_mission_cancel = server.OCPHandler._handle_mesh_mission_cancel
 ProbeHandler._handle_mesh_mission_resume = server.OCPHandler._handle_mesh_mission_resume
 ProbeHandler._handle_mesh_mission_resume_from_checkpoint = server.OCPHandler._handle_mesh_mission_resume_from_checkpoint
@@ -161,7 +174,10 @@ def make_mesh_http_server(mesh):
             path = parsed.path
             params = parse_qs(parsed.query)
             try:
-                if path in {"/", "/control", "/control/mobile"}:
+                if path in {"/", "/easy"}:
+                    self._send_html(server.build_easy_page(mesh))
+                    return
+                if path in {"/control", "/control/mobile"}:
                     self._send_html(server.build_control_page(mesh))
                     return
                 if path == "/mesh/control/stream":
@@ -181,6 +197,9 @@ def make_mesh_http_server(mesh):
                     return
                 if path == "/mesh/device-profile":
                     self._send_json({"status": "ok", "device_profile": dict(mesh.device_profile)})
+                    return
+                if path == "/mesh/connectivity/diagnostics":
+                    self._send_json(mesh.connectivity_diagnostics(limit=24))
                     return
                 if path == "/mesh/discovery/candidates":
                     limit = int(params.get("limit", ["25"])[0])
@@ -344,6 +363,39 @@ def make_mesh_http_server(mesh):
                         )
                     )
                     return
+                if path == "/mesh/discovery/scan-local":
+                    self._send_json(
+                        mesh.scan_local_peers(
+                            trust_tier=(payload.get("trust_tier") or "trusted").strip(),
+                            timeout=float(payload.get("timeout") or 0.8),
+                            limit=int(payload.get("limit") or 24),
+                            port=int(payload.get("port") or 0),
+                        )
+                    )
+                    return
+                if path == "/mesh/peers/connect":
+                    self._send_json(
+                        mesh.connect_device(
+                            base_url=(payload.get("base_url") or "").strip(),
+                            peer_id=(payload.get("peer_id") or "").strip(),
+                            trust_tier=(payload.get("trust_tier") or "trusted").strip(),
+                            timeout=float(payload.get("timeout") or 3.0),
+                            refresh_manifest=bool(payload.get("refresh_manifest", True)),
+                        )
+                    )
+                    return
+                if path == "/mesh/peers/connect-all":
+                    self._send_json(
+                        mesh.connect_all_devices(
+                            trust_tier=(payload.get("trust_tier") or "trusted").strip(),
+                            timeout=float(payload.get("timeout") or 3.0),
+                            scan_timeout=float(payload.get("scan_timeout") or 0.8),
+                            limit=int(payload.get("limit") or 24),
+                            port=int(payload.get("port") or 0),
+                            refresh_manifest=bool(payload.get("refresh_manifest", True)),
+                        )
+                    )
+                    return
                 if path == "/mesh/notifications/publish":
                     self._send_json(
                         {
@@ -440,6 +492,17 @@ def make_mesh_http_server(mesh):
                             metadata=dict(payload.get("metadata") or {}),
                             job=dict(payload.get("job") or {}),
                             cooperative_task=dict(payload.get("cooperative_task") or {}),
+                        )
+                    )
+                    return
+                if path == "/mesh/missions/test-launch":
+                    self._send_json(
+                        mesh.launch_test_mission(
+                            peer_id=(payload.get("peer_id") or "").strip(),
+                            base_url=(payload.get("base_url") or "").strip(),
+                            trust_tier=(payload.get("trust_tier") or "trusted").strip(),
+                            timeout=float(payload.get("timeout") or 3.0),
+                            request_id=(payload.get("request_id") or "").strip() or None,
                         )
                     )
                     return
@@ -4159,6 +4222,10 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("Watch review needed", probe.payload)
         self.assertIn("Approve resume", probe.payload)
         self.assertIn("Mesh Pulse", probe.payload)
+        self.assertIn("Connect Devices", probe.payload)
+        self.assertIn("Scan Nearby", probe.payload)
+        self.assertIn("Connect Everything", probe.payload)
+        self.assertIn("Send Test Mission", probe.payload)
         self.assertIn("Live Mission Stream", probe.payload)
         self.assertIn("Operator Inspect", probe.payload)
         self.assertIn("Recovery + Queue", probe.payload)
@@ -4174,6 +4241,32 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("Cancel Job", probe.payload)
         self.assertIn("/mesh/control/stream", probe.payload)
         self.assertIn("/mesh/notifications", probe.payload)
+
+    def test_server_easy_page_handler_returns_human_friendly_html(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        _, beta_base_url = self.serve_mesh(beta)
+        server.server_context["mesh"] = alpha.mesh
+        alpha.mesh.connect_device(base_url=beta_base_url, trust_tier="trusted")
+        probe = ProbeHandler()
+
+        probe._handle_easy_page()
+
+        self.assertEqual(probe.code, 200)
+        self.assertEqual(probe.content_type, "text/html; charset=utf-8")
+        self.assertIn("OCP Easy Setup", probe.payload)
+        self.assertIn("Connect two computers without becoming the network department.", probe.payload)
+        self.assertIn("Nearby Computers", probe.payload)
+        self.assertIn("Scan Nearby", probe.payload)
+        self.assertIn("Connect Everything", probe.payload)
+        self.assertIn("Send Test Mission", probe.payload)
+        self.assertIn("Copy My Easy Link", probe.payload)
+        self.assertIn("Share This Easy Link", probe.payload)
+        self.assertIn("Scan This QR Code", probe.payload)
+        self.assertIn("qrcode.min.js", probe.payload)
+        self.assertIn("Open Advanced Deck", probe.payload)
+        self.assertIn("beta-node", probe.payload)
+        self.assertIn("127.0.0.1", probe.payload)
 
     def test_server_mesh_device_profile_handlers_round_trip_profile(self):
         alpha = self.make_stack("alpha")
@@ -4219,6 +4312,56 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(probe.payload["count"], 1)
         self.assertEqual(probe.payload["candidates"][0]["peer_id"], "beta-node")
 
+    def test_server_connect_surface_handlers_round_trip(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        _, beta_base_url = self.serve_mesh(beta)
+        server.server_context["mesh"] = alpha.mesh
+
+        original = alpha.mesh.suggest_local_scan_urls
+        alpha.mesh.suggest_local_scan_urls = lambda **_: [beta_base_url]
+        try:
+            probe = ProbeHandler()
+            probe._handle_mesh_discovery_scan_local({"timeout": 0.5, "limit": 12})
+            self.assertEqual(probe.code, 200)
+            self.assertEqual(probe.payload["discovered"], 1)
+            self.assertEqual(probe.payload["results"][0]["peer_id"], "beta-node")
+        finally:
+            alpha.mesh.suggest_local_scan_urls = original
+
+        probe = ProbeHandler()
+        probe._handle_mesh_peers_connect({"base_url": beta_base_url, "trust_tier": "trusted"})
+        self.assertEqual(probe.code, 200)
+        self.assertEqual(probe.payload["status"], "ok")
+        self.assertEqual(probe.payload["peer"]["peer_id"], "beta-node")
+
+        original = alpha.mesh.suggest_local_scan_urls
+        alpha.mesh.suggest_local_scan_urls = lambda **_: [beta_base_url]
+        try:
+            probe = ProbeHandler()
+            probe._handle_mesh_peers_connect_all({"trust_tier": "trusted", "limit": 12})
+            self.assertEqual(probe.code, 200)
+            self.assertEqual(probe.payload["status"], "ok")
+            self.assertGreaterEqual(probe.payload["already_connected"] + probe.payload["connected"], 1)
+            self.assertIn("mesh", probe.payload)
+        finally:
+            alpha.mesh.suggest_local_scan_urls = original
+
+        probe = ProbeHandler()
+        probe._handle_mesh_connectivity_diagnostics()
+        self.assertEqual(probe.code, 200)
+        self.assertEqual(probe.payload["status"], "ok")
+        self.assertIn("local_ipv4", probe.payload)
+        self.assertIn("scan_urls", probe.payload)
+
+        probe = ProbeHandler()
+        probe._handle_mesh_mission_test_launch({"peer_id": "beta-node"})
+        self.assertEqual(probe.code, 200)
+        self.assertEqual(probe.payload["status"], "ok")
+        self.assertEqual(probe.payload["peer_id"], "beta-node")
+        self.assertEqual(probe.payload["mission"]["summary"]["cooperative_task_count"], 1)
+        self.assertEqual(probe.payload["mission"]["summary"]["job_count"], 1)
+
     def test_device_profile_endpoint_is_exposed_over_http(self):
         alpha = self.make_stack("alpha")
         alpha_client, _ = self.serve_mesh(alpha)
@@ -4251,6 +4394,49 @@ class SovereignMeshTests(unittest.TestCase):
         candidates = alpha_client.list_discovery_candidates(limit=10)
         self.assertEqual(candidates["count"], 1)
         self.assertEqual(candidates["candidates"][0]["peer_id"], "beta-node")
+
+    def test_easy_connect_endpoints_are_exposed_over_http(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        alpha_client, _ = self.serve_mesh(alpha)
+        _, beta_base_url = self.serve_mesh(beta)
+
+        connected = alpha_client.connect_peer({"base_url": beta_base_url, "trust_tier": "trusted"})
+        self.assertEqual(connected["status"], "ok")
+        self.assertEqual(connected["peer"]["peer_id"], "beta-node")
+
+        original = alpha.mesh.suggest_local_scan_urls
+        alpha.mesh.suggest_local_scan_urls = lambda **_: [beta_base_url]
+        try:
+            connected_all = alpha_client.connect_all_peers({"trust_tier": "trusted", "limit": 12})
+        finally:
+            alpha.mesh.suggest_local_scan_urls = original
+        self.assertEqual(connected_all["status"], "ok")
+        self.assertGreaterEqual(connected_all["already_connected"] + connected_all["connected"], 1)
+        self.assertIn("mesh", connected_all)
+
+        diagnostics = alpha_client.connectivity_diagnostics()
+        self.assertEqual(diagnostics["status"], "ok")
+        self.assertIn("scan_urls", diagnostics)
+
+        launched = alpha_client.launch_test_mission({"peer_id": "beta-node"})
+        self.assertEqual(launched["status"], "ok")
+        self.assertEqual(launched["peer_id"], "beta-node")
+        self.assertEqual(launched["mission"]["summary"]["cooperative_task_count"], 1)
+        self.assertEqual(launched["mission"]["summary"]["job_count"], 1)
+
+    def test_connect_peer_uses_reachable_base_url_when_remote_manifest_advertises_wildcard(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        _, beta_base_url = self.serve_mesh(beta)
+        beta.mesh.base_url = "http://0.0.0.0:8431"
+
+        connected = alpha.mesh.connect_device(base_url=beta_base_url, trust_tier="trusted")
+
+        self.assertEqual(connected["status"], "ok")
+        self.assertEqual(connected["peer"]["peer_id"], "beta-node")
+        self.assertTrue(str(connected["peer"]["endpoint_url"]).startswith("http://"))
+        self.assertNotIn("0.0.0.0", connected["peer"]["endpoint_url"])
 
     def test_notification_and_approval_endpoints_are_exposed_over_http(self):
         alpha = self.make_stack("alpha")
@@ -4338,6 +4524,10 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("OCP Control Deck", markup)
         self.assertIn("Relay status ready", markup)
         self.assertIn("Mesh Pulse", markup)
+        self.assertIn("Connect Devices", markup)
+        self.assertIn("Scan Nearby", markup)
+        self.assertIn("Connect Everything", markup)
+        self.assertIn("Send Test Mission", markup)
         self.assertIn("Live Mission Stream", markup)
         self.assertIn("Operator Inspect", markup)
         self.assertIn("Recovery + Queue", markup)
@@ -4354,6 +4544,43 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("Cancel Job", markup)
         self.assertIn("Refresh Deck", markup)
         self.assertIn("ocp-mobile-ui", markup)
+
+    def test_easy_page_is_exposed_over_http(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        alpha_client, base_url = self.serve_mesh(alpha)
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha_client.connect_peer({"base_url": beta_base_url, "trust_tier": "trusted"})
+
+        with urlopen(f"{base_url}/") as response:
+            markup = response.read().decode("utf-8")
+            content_type = response.headers.get("Content-Type")
+
+        self.assertEqual(content_type, "text/html; charset=utf-8")
+        self.assertIn("OCP Easy Setup", markup)
+        self.assertIn("Connect two computers without becoming the network department.", markup)
+        self.assertIn("Nearby Computers", markup)
+        self.assertIn("Scan Nearby", markup)
+        self.assertIn("Connect Everything", markup)
+        self.assertIn("Send Test Mission", markup)
+        self.assertIn("Copy My Easy Link", markup)
+        self.assertIn("Share This Easy Link", markup)
+        self.assertIn("Scan This QR Code", markup)
+        self.assertIn("qrcode.min.js", markup)
+        self.assertIn("Open Advanced Deck", markup)
+        self.assertIn("beta-node", markup)
+
+        with urlopen(f"{base_url}/easy") as response:
+            easy_markup = response.read().decode("utf-8")
+
+        self.assertIn("OCP Easy Setup", easy_markup)
+
+    def test_start_ocp_easy_helpers_prefer_local_browser_url_for_wildcard_hosts(self):
+        self.assertEqual(start_ocp_easy.display_host_for_browser("0.0.0.0"), "127.0.0.1")
+        self.assertEqual(start_ocp_easy.display_host_for_browser("::"), "127.0.0.1")
+        self.assertEqual(start_ocp_easy.display_host_for_browser("172.20.10.11"), "172.20.10.11")
+        self.assertEqual(start_ocp_easy.build_open_url("0.0.0.0", 8421), "http://127.0.0.1:8421/")
+        self.assertEqual(start_ocp_easy.build_open_url("172.20.10.11", 8431, "/control"), "http://172.20.10.11:8431/control")
 
     def test_control_stream_payload_includes_state_and_recent_events(self):
         alpha = self.make_stack("alpha")

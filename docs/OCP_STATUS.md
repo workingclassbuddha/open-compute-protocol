@@ -68,6 +68,12 @@ Related planning docs:
 - Stronger phone operator deck with queue/recovery cards, direct resume/restart/replay/cancel controls, and live auto-refresh
 - SSE-backed control stream for the cockpit so mission, queue, helper, approval, and notification updates can push into the deck without waiting for timer refreshes
 - Active peer seek/discovery with candidate tracking, optional auto-connect, and mesh-visible discovery records
+- First operator-grade `Connect Devices` flow in the control deck with nearby scan, one-click connect, built-in reachability diagnostics, and one-click test missions
+- New plain-language easy setup surface at `GET /` and `GET /easy` so first-run pairing can start on a friendlier page while `/control` remains the advanced cockpit
+- Easy setup share-link copy and plain troubleshooting guidance so nearby pairing can fall back to “copy this link to the other computer” instead of terminal instructions
+- QR pairing on the easy page plus an auto-open launcher script so first-run setup can start with `python3 scripts/start_ocp_easy.py` and a scannable pairing link
+- One-button `Connect Everything` mesh join flow so the runtime can scan, connect, and fold nearby trusted devices into one reachable mesh without per-peer clicking
+- Base-url normalization for wildcard-bound nodes so `--host 0.0.0.0` advertises a reachable endpoint instead of leaking wildcard addresses into peer state
 - Cooperative task groups that fan one logical task into multiple child jobs across local and remote peers
 - Aggregated cooperative-task state with child-job summaries so multiple machines can act on one larger job together
 - First Mission Layer with durable mission objects above jobs and cooperative task groups
@@ -132,6 +138,7 @@ Related planning docs:
 - Phone-friendly web controller surface served directly by the standalone OCP node
 - Mobile operator workflow for acting on queue-backed jobs and resumable recovery from the phone browser
 - First active peer-discovery baseline for operator-driven mesh expansion
+- First app-grade pair/connect baseline so two fresh nodes can move from discovery to trusted remote execution without raw Python snippets
 - First cooperative multi-peer execution baseline for splitting a single task across multiple computers
 - First mission-oriented orchestration baseline for keeping higher-level intent durable across retries, checkpoints, restarts, and cooperative handoffs
 - First autonomous helper-enlistment baseline for bringing extra devices into the mesh when the local node is saturated
@@ -150,6 +157,8 @@ Related planning docs:
 ## Key OCP surfaces in this repo
 
 - Manifest: `GET /mesh/manifest`
+- Easy setup UI: `GET /`
+- Alternate easy setup UI: `GET /easy`
 - Phone control UI: `GET /control`
 - Phone control stream: `GET /mesh/control/stream`
 - Device profile: `GET /mesh/device-profile`
@@ -175,9 +184,13 @@ Related planning docs:
 - Approval resolve: `POST /mesh/approvals/{approval_id}/resolve`
 - Discovery candidates: `GET /mesh/discovery/candidates`
 - Discovery seek: `POST /mesh/discovery/seek`
+- Local discovery scan: `POST /mesh/discovery/scan-local`
+- Connectivity diagnostics: `GET /mesh/connectivity/diagnostics`
+- One-click peer connect: `POST /mesh/peers/connect`
 - Mission list: `GET /mesh/missions`
 - Mission inspect: `GET /mesh/missions/{mission_id}`
 - Mission launch: `POST /mesh/missions/launch`
+- Mission test launch: `POST /mesh/missions/test-launch`
 - Mission cancel: `POST /mesh/missions/{mission_id}/cancel`
 - Mission resume latest: `POST /mesh/missions/{mission_id}/resume`
 - Mission resume checkpoint: `POST /mesh/missions/{mission_id}/resume-from-checkpoint`
@@ -216,8 +229,8 @@ Related planning docs:
 
 ## Recommended next OCP builds
 
-1. Add a mission launch helper in the control surface so operators can create single-job or cooperative missions without dropping to raw JSON.
-2. Add cooperative task launch UIs and richer GPU execution lanes so mixed CPU/GPU mesh jobs are easier to create, inspect, and drain.
+1. Turn the control-deck pair/connect flow into a packaged desktop app with firewall prompts, tray presence, and startup defaults so OCP feels native instead of server-first.
+2. Add a mission launch helper in the control surface so operators can create single-job or cooperative missions without dropping to raw JSON.
 
 ## Broader roadmap
 

@@ -144,13 +144,13 @@ Some devices are powerful. Some are private. Some are fragile. Some are approval
 ```bash
 git clone https://github.com/matthewacator-cpu/open-compute-protocol.git
 cd open-compute-protocol
-./scripts/start_ocp.sh
+python3 scripts/start_ocp_easy.py
 ```
 
-Then open the control deck:
+Then open the easy setup page:
 
 ```text
-http://127.0.0.1:8421/control
+http://127.0.0.1:8421/
 ```
 
 If the deck is empty on a fresh node, seed demo activity in a second terminal:
@@ -163,6 +163,12 @@ If you want the direct server form instead of the helper script:
 
 ```bash
 python3 server.py --host 127.0.0.1 --port 8421
+```
+
+If you want the shell-based starter instead of the auto-open launcher:
+
+```bash
+./scripts/start_ocp.sh
 ```
 
 **Useful options:**
@@ -183,9 +189,17 @@ For a fuller walkthrough, see [docs/QUICKSTART.md](./docs/QUICKSTART.md).
 
 ## Operator Control Deck
 
-OCP ships a built-in control surface at `GET /control`.
+OCP ships a built-in easy setup surface at `GET /` and an advanced control surface at `GET /control`.
 
-The deck is phone-friendly, so your phone can act as a real operator console for the mesh. From there you can inspect and act on:
+The easy page is meant for the common human flow: open OCP on two or more machines, press `Connect Everything`, then press `Send Test Mission`.
+It now also supports:
+
+- `Copy My Easy Link` for manual fallback
+- QR pairing so the second device can open the pairing link by scanning instead of typing
+- one-button nearby mesh join with `Connect Everything`
+- an auto-open starter script at `python3 scripts/start_ocp_easy.py`
+
+The advanced deck is phone-friendly, so your phone can act as a real operator console for the mesh. From there you can inspect and act on:
 
 - Peer and helper state
 - Queue and recovery status
