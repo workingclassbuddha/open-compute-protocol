@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -19,6 +20,126 @@ server_context = {
     "runtime": None,
     "ready": False,
 }
+
+
+def _latest_event_cursor(mesh: SovereignMesh) -> int:
+    try:
+        with mesh._conn() as conn:
+            row = conn.execute("SELECT MAX(seq) AS seq FROM mesh_events").fetchone()
+        return int((row["seq"] if row is not None else 0) or 0)
+    except Exception:
+        return 0
+
+
+def build_control_state(mesh: SovereignMesh) -> dict[str, Any]:
+    manifest = mesh.get_manifest()
+    organism_card = dict(manifest.get("organism_card") or {})
+    node_id = organism_card.get("organism_id") or organism_card.get("node_id") or mesh.node_id
+    display_name = organism_card.get("display_name") or mesh.display_name or node_id
+    device_profile = dict(manifest.get("device_profile") or mesh.device_profile or {})
+    implementation = dict(manifest.get("implementation") or {})
+    peer_snapshot = dict(mesh.list_peers(limit=8) or {})
+    notification_snapshot = dict(mesh.list_notifications(limit=8, target_peer_id=node_id) or {})
+    approval_snapshot = dict(mesh.list_approvals(limit=8, target_peer_id=node_id) or {})
+    queue_metrics = dict(mesh.queue_metrics() or {})
+    queue_snapshot = dict(mesh.list_queue_messages(limit=8) or {})
+    queue_messages = list(queue_snapshot.get("messages") or [])
+    jobs_by_id: dict[str, dict] = {}
+    for queue_message in queue_messages:
+        job_id = str(queue_message.get("job_id") or "").strip()
+        if not job_id:
+            continue
+        try:
+            jobs_by_id[job_id] = mesh.get_job(job_id)
+        except Exception:
+            continue
+    worker_snapshot = dict(mesh.list_workers(limit=8) or {})
+    sync_policy = dict(manifest.get("sync_policy") or {})
+    try:
+        pressure = dict(mesh.mesh_pressure() or {})
+    except Exception:
+        pressure = {"pressure": "idle", "queued": 0, "inflight": 0, "total_slots": 0, "available_slots": 0, "reasons": [], "needs_help": False}
+    try:
+        helper_snapshot = dict(mesh.list_helpers(limit=12) or {})
+    except Exception:
+        helper_snapshot = {"helpers": []}
+    try:
+        coop_snapshot = dict(mesh.list_cooperative_tasks(limit=6) or {})
+    except Exception:
+        coop_snapshot = {"tasks": []}
+    try:
+        mission_snapshot = dict(mesh.list_missions(limit=6) or {})
+    except Exception:
+        mission_snapshot = {"missions": []}
+    try:
+        autonomy = dict(mesh.evaluate_autonomous_offload() or {})
+    except Exception:
+        autonomy = {"decision": "noop", "policy": {}, "pressure": pressure, "reasons": []}
+    try:
+        preference_snapshot = dict(mesh.list_offload_preferences(limit=6) or {})
+    except Exception:
+        preference_snapshot = {"preferences": []}
+    version = " ".join(
+        part
+        for part in [
+            str(implementation.get("name") or "OCP").strip(),
+            str(manifest.get("protocol_release") or manifest.get("protocol_version") or "").strip(),
+        ]
+        if part
+    ).strip()
+    return {
+        "node_id": node_id,
+        "display_name": display_name,
+        "role_label": str(organism_card.get("role") or "Sovereign Node").strip() or "Sovereign Node",
+        "version": version or "OCP runtime",
+        "device_class": device_profile.get("device_class") or "full",
+        "device_profile": device_profile,
+        "sync_policy": sync_policy,
+        "manifest": manifest,
+        "peers": peer_snapshot,
+        "notifications": notification_snapshot,
+        "approvals": approval_snapshot,
+        "queue_metrics": queue_metrics,
+        "workers": worker_snapshot,
+        "queue": queue_snapshot,
+        "pressure": pressure,
+        "helpers": helper_snapshot,
+        "missions": mission_snapshot,
+        "cooperative_tasks": coop_snapshot,
+        "autonomy": autonomy,
+        "preferences": preference_snapshot,
+        "jobs": jobs_by_id,
+        "control_stream": {
+            "route": "/mesh/control/stream",
+            "cursor": _latest_event_cursor(mesh),
+            "transport": "sse",
+            "fallback_refresh_seconds": 60,
+        },
+    }
+
+
+def build_control_stream_payload(
+    mesh: SovereignMesh,
+    *,
+    since_seq: int = 0,
+    limit: int = 50,
+    snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    snapshot = snapshot or mesh.stream_snapshot(since_seq=max(0, int(since_seq)), limit=max(1, int(limit)))
+    cursor = int(snapshot.get("next_cursor") or since_seq or 0)
+    state = build_control_state(mesh)
+    state["control_stream"] = {
+        **dict(state.get("control_stream") or {}),
+        "cursor": cursor,
+        "recent_event_count": len(snapshot.get("events") or []),
+    }
+    return {
+        "type": "control_state",
+        "cursor": cursor,
+        "events": list(snapshot.get("events") or []),
+        "state": state,
+        "generated_at": snapshot.get("generated_at") or "",
+    }
 
 
 def _render_control_stat(label: str, value: Any, tone: str = "neutral") -> str:
@@ -336,94 +457,7 @@ def _render_cooperative_task_cards(tasks: list[dict]) -> str:
 
 
 def build_control_page(mesh: SovereignMesh) -> str:
-    manifest = mesh.get_manifest()
-    organism_card = dict(manifest.get("organism_card") or {})
-    node_id = organism_card.get("organism_id") or organism_card.get("node_id") or mesh.node_id
-    display_name = organism_card.get("display_name") or mesh.display_name or node_id
-    device_profile = dict(manifest.get("device_profile") or mesh.device_profile or {})
-    implementation = dict(manifest.get("implementation") or {})
-    peer_snapshot = dict(mesh.list_peers(limit=8) or {})
-    peers = list(peer_snapshot.get("peers") or [])
-    notification_snapshot = dict(mesh.list_notifications(limit=8, target_peer_id=node_id) or {})
-    notifications = list(notification_snapshot.get("notifications") or [])
-    approval_snapshot = dict(mesh.list_approvals(limit=8, target_peer_id=node_id) or {})
-    approvals = list(approval_snapshot.get("approvals") or [])
-    queue_metrics = dict(mesh.queue_metrics() or {})
-    queue_snapshot = dict(mesh.list_queue_messages(limit=8) or {})
-    queue_messages = list(queue_snapshot.get("messages") or [])
-    jobs_by_id: dict[str, dict] = {}
-    for queue_message in queue_messages:
-        job_id = str(queue_message.get("job_id") or "").strip()
-        if not job_id:
-            continue
-        try:
-            jobs_by_id[job_id] = mesh.get_job(job_id)
-        except Exception:
-            continue
-    worker_snapshot = dict(mesh.list_workers(limit=8) or {})
-    workers = list(worker_snapshot.get("workers") or [])
-    sync_policy = dict(manifest.get("sync_policy") or {})
-    try:
-        pressure = dict(mesh.mesh_pressure() or {})
-    except Exception:
-        pressure = {"pressure": "idle", "queued": 0, "inflight": 0, "total_slots": 0, "available_slots": 0, "reasons": [], "needs_help": False}
-    try:
-        helper_snapshot = dict(mesh.list_helpers(limit=12) or {})
-        helpers = list(helper_snapshot.get("helpers") or [])
-    except Exception:
-        helper_snapshot = {"helpers": []}
-        helpers = []
-    try:
-        coop_snapshot = dict(mesh.list_cooperative_tasks(limit=6) or {})
-        coop_tasks = list(coop_snapshot.get("tasks") or [])
-    except Exception:
-        coop_snapshot = {"tasks": []}
-        coop_tasks = []
-    try:
-        mission_snapshot = dict(mesh.list_missions(limit=6) or {})
-    except Exception:
-        mission_snapshot = {"missions": []}
-    try:
-        autonomy = dict(mesh.evaluate_autonomous_offload() or {})
-    except Exception:
-        autonomy = {"decision": "noop", "policy": {}, "pressure": pressure, "reasons": []}
-    try:
-        preference_snapshot = dict(mesh.list_offload_preferences(limit=6) or {})
-        preferences = list(preference_snapshot.get("preferences") or [])
-    except Exception:
-        preference_snapshot = {"preferences": []}
-        preferences = []
-    version = " ".join(
-        part
-        for part in [
-            str(implementation.get("name") or "OCP").strip(),
-            str(manifest.get("protocol_release") or manifest.get("protocol_version") or "").strip(),
-        ]
-        if part
-    ).strip()
-    initial_state = {
-        "node_id": node_id,
-        "display_name": display_name,
-        "role_label": str(organism_card.get("role") or "Sovereign Node").strip() or "Sovereign Node",
-        "version": version or "OCP runtime",
-        "device_class": device_profile.get("device_class") or "full",
-        "device_profile": device_profile,
-        "sync_policy": sync_policy,
-        "manifest": manifest,
-        "peers": peer_snapshot,
-        "notifications": notification_snapshot,
-        "approvals": approval_snapshot,
-        "queue_metrics": queue_metrics,
-        "workers": worker_snapshot,
-        "queue": queue_snapshot,
-        "pressure": pressure,
-        "helpers": helper_snapshot,
-        "missions": mission_snapshot,
-        "cooperative_tasks": coop_snapshot,
-        "autonomy": autonomy,
-        "preferences": preference_snapshot,
-        "jobs": jobs_by_id,
-    }
+    initial_state = build_control_state(mesh)
     bootstrap = json.dumps(initial_state).replace("</", "<\\/")
     control_html = """<!doctype html>
 <html lang="en">
@@ -1997,6 +2031,7 @@ def build_control_page(mesh: SovereignMesh) -> str:
     const OCP_CONTROL_BOOTSTRAP = __OCP_CONTROL_BOOTSTRAP__;
     const JSON_SURFACES = [
       { label: "/mesh/manifest", href: "/mesh/manifest" },
+      { label: "/mesh/control/stream", href: "/mesh/control/stream" },
       { label: "/mesh/peers", href: "/mesh/peers" },
       { label: "/mesh/discovery/candidates", href: "/mesh/discovery/candidates" },
       { label: "/mesh/queue", href: "/mesh/queue" },
@@ -2015,6 +2050,11 @@ def build_control_page(mesh: SovereignMesh) -> str:
       meshScene: null,
       refreshTimer: null,
       activityMemory: {},
+      stream: {
+        source: null,
+        cursor: Number((((OCP_CONTROL_BOOTSTRAP || {}).control_stream || {}).cursor) || 0),
+        reconnectTimer: null
+      },
       gauges: {
         hero: { current: 0, target: 0, canvas: null, type: "hero" },
         main: { current: 0, target: 0, canvas: null, type: "main" }
@@ -3605,6 +3645,82 @@ def build_control_page(mesh: SovereignMesh) -> str:
       return nextState;
     }
 
+    function closeControlStream() {
+      if (app.stream.reconnectTimer) {
+        clearTimeout(app.stream.reconnectTimer);
+        app.stream.reconnectTimer = null;
+      }
+      if (app.stream.source) {
+        app.stream.source.close();
+        app.stream.source = null;
+      }
+    }
+
+    function scheduleControlStreamReconnect() {
+      if (app.stream.reconnectTimer) {
+        return;
+      }
+      app.stream.reconnectTimer = setTimeout(function () {
+        app.stream.reconnectTimer = null;
+        initControlStream();
+      }, 2500);
+    }
+
+    function applyControlStreamEnvelope(envelope) {
+      if (!envelope || !envelope.state) {
+        return;
+      }
+      const nextState = Object.assign({}, app.state, envelope.state);
+      const controlStream = Object.assign({}, nextState.control_stream || {}, {
+        cursor: Number(envelope.cursor || (((envelope.state || {}).control_stream || {}).cursor) || app.stream.cursor || 0),
+        recent_event_count: Array.isArray(envelope.events) ? envelope.events.length : 0,
+        generated_at: envelope.generated_at || ""
+      });
+      nextState.control_stream = controlStream;
+      app.state = nextState;
+      app.stream.cursor = Number(controlStream.cursor || 0);
+      renderAll(app.state);
+      if (Array.isArray(envelope.events) && envelope.events.length) {
+        const latestEvent = envelope.events[envelope.events.length - 1] || {};
+        setStatus("Live stream: " + String(envelope.events.length) + " mesh event(s) applied through " + String(latestEvent.event_type || "control update") + ".");
+      }
+    }
+
+    function initControlStream() {
+      closeControlStream();
+      if (typeof window.EventSource !== "function") {
+        setStatus("Live stream unavailable in this browser. Using periodic refresh.");
+        return;
+      }
+      const route = ((((app.state || {}).control_stream || {}).route) || "/mesh/control/stream");
+      const since = Number(app.stream.cursor || ((((app.state || {}).control_stream || {}).cursor) || 0));
+      const source = new EventSource(route + "?since=" + encodeURIComponent(String(since)));
+      app.stream.source = source;
+      source.addEventListener("control-state", function (event) {
+        try {
+          const envelope = JSON.parse(event.data || "{}");
+          applyControlStreamEnvelope(envelope);
+        } catch (error) {
+          setStatus("Live stream parse failed: " + error.message);
+        }
+      });
+      source.addEventListener("stream-open", function (event) {
+        try {
+          const payload = JSON.parse(event.data || "{}");
+          if (payload && payload.cursor != null) {
+            app.stream.cursor = Number(payload.cursor || app.stream.cursor || 0);
+          }
+        } catch (error) {
+        }
+        setStatus("Live mesh stream connected.");
+      });
+      source.onerror = function () {
+        closeControlStream();
+        setStatus("Live mesh stream interrupted. Reconnecting...");
+        scheduleControlStreamReconnect();
+      };
+    }
+
     async function acknowledgeNotification(notificationId) {
       await fetchJson("/mesh/notifications/" + encodeURIComponent(notificationId) + "/ack", {
         method: "POST",
@@ -3845,13 +3961,14 @@ def build_control_page(mesh: SovereignMesh) -> str:
       if (app.refreshTimer) {
         clearInterval(app.refreshTimer);
       }
+      const fallbackSeconds = Number((((app.state || {}).control_stream || {}).fallback_refresh_seconds) || 60);
       app.refreshTimer = setInterval(function () {
         if (document.visibilityState === "visible") {
           fetchState({ silent: true }).catch(function (error) {
             setStatus("Refresh failed: " + error.message);
           });
         }
-      }, 15000);
+      }, Math.max(15000, fallbackSeconds * 1000));
     }
 
     function init() {
@@ -3860,6 +3977,7 @@ def build_control_page(mesh: SovereignMesh) -> str:
       initGauges();
       initActions();
       initPolling();
+      initControlStream();
       updateSectionReveals();
       renderAll(app.state);
       setStatus("Sovereign mesh cockpit online with live pulse tracking.");
@@ -3907,8 +4025,72 @@ class OCPHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def _begin_sse(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+
+    def _write_sse_event(self, event_name: str, payload: dict[str, Any], *, event_id: str = ""):
+        if event_id:
+            self.wfile.write(f"id: {event_id}\n".encode("utf-8"))
+        self.wfile.write(f"event: {event_name}\n".encode("utf-8"))
+        for line in json.dumps(payload).splitlines():
+            self.wfile.write(f"data: {line}\n".encode("utf-8"))
+        self.wfile.write(b"\n")
+        self.wfile.flush()
+
+    def _write_sse_comment(self, text: str = "keepalive"):
+        self.wfile.write(f": {text}\n\n".encode("utf-8"))
+        self.wfile.flush()
+
     def _handle_control_page(self):
         self._send_html(build_control_page(self._mesh()))
+
+    def _handle_control_stream(self, params):
+        mesh = self._mesh()
+        header_cursor = 0
+        try:
+            header_cursor = int(self.headers.get("Last-Event-ID", "0") or 0)
+        except Exception:
+            header_cursor = 0
+        query_cursor = int(params.get("since", ["0"])[0] or 0)
+        if query_cursor <= 0 and header_cursor <= 0:
+            cursor = _latest_event_cursor(mesh)
+        else:
+            cursor = max(query_cursor, header_cursor, 0)
+        limit = max(1, int(params.get("limit", ["50"])[0] or 50))
+        once = params.get("once", ["0"])[0] in {"1", "true", "yes"}
+        heartbeat_seconds = max(2.0, float(params.get("heartbeat", ["10"])[0] or 10.0))
+        try:
+            self._begin_sse()
+            opened = {"status": "ok", "cursor": cursor, "route": "/mesh/control/stream"}
+            self._write_sse_event("stream-open", opened, event_id=str(cursor))
+            snapshot = mesh.stream_snapshot(since_seq=cursor, limit=limit)
+            envelope = build_control_stream_payload(mesh, since_seq=cursor, limit=limit, snapshot=snapshot)
+            cursor = int(envelope.get("cursor") or cursor)
+            self._write_sse_event("control-state", envelope, event_id=str(cursor))
+            if once:
+                return
+            last_keepalive = time.monotonic()
+            while True:
+                time.sleep(1.0)
+                snapshot = mesh.stream_snapshot(since_seq=cursor, limit=limit)
+                events = list(snapshot.get("events") or [])
+                if events:
+                    envelope = build_control_stream_payload(mesh, since_seq=cursor, limit=limit, snapshot=snapshot)
+                    next_cursor = int(envelope.get("cursor") or cursor)
+                    cursor = next_cursor
+                    self._write_sse_event("control-state", envelope, event_id=str(cursor))
+                    last_keepalive = time.monotonic()
+                    continue
+                if time.monotonic() - last_keepalive >= heartbeat_seconds:
+                    self._write_sse_comment()
+                    last_keepalive = time.monotonic()
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
     def _handle_mesh_manifest(self):
         self._send_json(self._mesh().get_manifest())
@@ -4534,6 +4716,8 @@ class OCPHandler(BaseHTTPRequestHandler):
         try:
             if path in {"/", "/control", "/control/mobile"}:
                 return self._handle_control_page()
+            if path == "/mesh/control/stream":
+                return self._handle_control_stream(params)
             if path == "/mesh/manifest":
                 return self._handle_mesh_manifest()
             if path == "/mesh/device-profile":

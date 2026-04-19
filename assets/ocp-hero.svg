@@ -1,0 +1,95 @@
+<svg width="1600" height="900" viewBox="0 0 1600 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="160" y1="60" x2="1440" y2="840" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#09111F"/>
+      <stop offset="0.45" stop-color="#10263A"/>
+      <stop offset="1" stop-color="#05070B"/>
+    </linearGradient>
+    <radialGradient id="glowA" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(408 232) rotate(90) scale(260 380)">
+      <stop stop-color="#66E5D7" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#66E5D7" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1210 670) rotate(90) scale(240 340)">
+      <stop stop-color="#FF8C69" stop-opacity="0.26"/>
+      <stop offset="1" stop-color="#FF8C69" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="line" x1="333" y1="160" x2="1280" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#77FFE3" stop-opacity="0.92"/>
+      <stop offset="0.5" stop-color="#72C9FF" stop-opacity="0.72"/>
+      <stop offset="1" stop-color="#FF9F6E" stop-opacity="0.92"/>
+    </linearGradient>
+    <filter id="blurSoft" x="-120" y="-120" width="1840" height="1140" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="48"/>
+    </filter>
+    <filter id="card" x="0" y="0" width="1600" height="900" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="24" stdDeviation="44" flood-color="#000000" flood-opacity="0.32"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="900" rx="36" fill="url(#bg)"/>
+  <g filter="url(#blurSoft)">
+    <ellipse cx="408" cy="232" rx="380" ry="260" fill="url(#glowA)"/>
+    <ellipse cx="1210" cy="670" rx="340" ry="240" fill="url(#glowB)"/>
+  </g>
+
+  <g opacity="0.14">
+    <path d="M130 120H1470" stroke="#B7D8FF"/>
+    <path d="M130 220H1470" stroke="#B7D8FF"/>
+    <path d="M130 320H1470" stroke="#B7D8FF"/>
+    <path d="M130 420H1470" stroke="#B7D8FF"/>
+    <path d="M130 520H1470" stroke="#B7D8FF"/>
+    <path d="M130 620H1470" stroke="#B7D8FF"/>
+    <path d="M130 720H1470" stroke="#B7D8FF"/>
+    <path d="M240 90V810" stroke="#B7D8FF"/>
+    <path d="M460 90V810" stroke="#B7D8FF"/>
+    <path d="M680 90V810" stroke="#B7D8FF"/>
+    <path d="M900 90V810" stroke="#B7D8FF"/>
+    <path d="M1120 90V810" stroke="#B7D8FF"/>
+    <path d="M1340 90V810" stroke="#B7D8FF"/>
+  </g>
+
+  <g filter="url(#card)">
+    <rect x="72" y="72" width="1456" height="756" rx="30" fill="#0C1522" fill-opacity="0.52" stroke="#88B5FF" stroke-opacity="0.18"/>
+  </g>
+
+  <path d="M345 648L540 514L806 478L1002 370L1190 436L1312 620" stroke="url(#line)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+  <path d="M540 514L468 302L770 234L1002 370" stroke="url(#line)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.72"/>
+  <path d="M806 478L760 680L1312 620" stroke="url(#line)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.62"/>
+
+  <g>
+    <circle cx="345" cy="648" r="17" fill="#09131E" stroke="#6CF4DF" stroke-width="4"/>
+    <circle cx="540" cy="514" r="19" fill="#09131E" stroke="#75D6FF" stroke-width="4"/>
+    <circle cx="806" cy="478" r="22" fill="#09131E" stroke="#FFFFFF" stroke-width="4"/>
+    <circle cx="1002" cy="370" r="18" fill="#09131E" stroke="#FF9C70" stroke-width="4"/>
+    <circle cx="1190" cy="436" r="16" fill="#09131E" stroke="#FFD66B" stroke-width="4"/>
+    <circle cx="1312" cy="620" r="17" fill="#09131E" stroke="#88A8FF" stroke-width="4"/>
+    <circle cx="468" cy="302" r="14" fill="#09131E" stroke="#6CF4DF" stroke-width="3"/>
+    <circle cx="770" cy="234" r="16" fill="#09131E" stroke="#75D6FF" stroke-width="3"/>
+    <circle cx="760" cy="680" r="14" fill="#09131E" stroke="#FF9C70" stroke-width="3"/>
+  </g>
+
+  <g font-family="Avenir Next, Inter, Helvetica, Arial, sans-serif" fill="#E9F4FF">
+    <text x="132" y="182" font-size="22" letter-spacing="4" fill="#8ADDE3">SOVEREIGN MESH / OCP V0.1</text>
+    <text x="132" y="282" font-size="88" font-weight="700">The Open Compute</text>
+    <text x="132" y="370" font-size="88" font-weight="700">Protocol</text>
+    <text x="132" y="444" font-size="28" fill="#BFD0E4">A local-first compute fabric for trusted devices, helpers, missions,</text>
+    <text x="132" y="484" font-size="28" fill="#BFD0E4">artifacts, recovery, and governed offload across your own mesh.</text>
+
+    <rect x="132" y="552" width="166" height="46" rx="23" fill="#103249" stroke="#6CF4DF" stroke-opacity="0.42"/>
+    <text x="170" y="583" font-size="20" font-weight="600">MISSIONS</text>
+    <rect x="314" y="552" width="160" height="46" rx="23" fill="#10273E" stroke="#75D6FF" stroke-opacity="0.42"/>
+    <text x="350" y="583" font-size="20" font-weight="600">HELPERS</text>
+    <rect x="490" y="552" width="214" height="46" rx="23" fill="#392018" stroke="#FF9C70" stroke-opacity="0.42"/>
+    <text x="530" y="583" font-size="20" font-weight="600">CONTINUITY</text>
+
+    <text x="286" y="689" font-size="18" fill="#9FC0D8">Phone control</text>
+    <text x="490" y="552" font-size="18" fill="#9FC0D8">Watch</text>
+    <text x="760" y="510" font-size="18" fill="#9FC0D8">Mission layer</text>
+    <text x="965" y="344" font-size="18" fill="#9FC0D8">GPU node</text>
+    <text x="1140" y="412" font-size="18" fill="#9FC0D8">Relay</text>
+    <text x="1266" y="650" font-size="18" fill="#9FC0D8">Artifacts</text>
+    <text x="410" y="280" font-size="18" fill="#9FC0D8">Laptop helper</text>
+    <text x="722" y="206" font-size="18" fill="#9FC0D8">Workstation</text>
+    <text x="704" y="714" font-size="18" fill="#9FC0D8">Checkpoint</text>
+  </g>
+</svg>

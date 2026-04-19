@@ -1,71 +1,94 @@
-# Open Compute Protocol
+<p align="center">
+  <img src="./assets/ocp-hero.svg" alt="Open Compute Protocol" width="100%" />
+</p>
 
-OCP is a **sovereign, local-first compute fabric** for trusted devices.
+<br/>
 
-It is the layer that lets laptops, desktops, servers, GPU boxes, relays, phones, and other peers begin acting like one practical distributed machine without pretending they are one literal operating system.
+<div align="center">
 
-## Current Framing
+# The Open Compute Protocol
 
-- `OCP v0.1` = protocol/spec draft
-- `Sovereign Mesh` = current Python-first reference implementation
-- `sovereign-mesh/v1` = current wire version
+**A sovereign, local-first compute fabric for trusted devices.**
 
-This repository is the standalone home of that implementation.
+[![Tests](https://img.shields.io/badge/tests-119%20passing-00FF88?style=flat-square&labelColor=06090F)](./tests/test_sovereign_mesh.py)
+[![Version](https://img.shields.io/badge/wire%20version-sovereign--mesh%2Fv1-00D4FF?style=flat-square&labelColor=06090F)](./docs/OCP_STATUS.md)
+[![Status](https://img.shields.io/badge/status-active%20development-C8A96E?style=flat-square&labelColor=06090F)](./docs/OCP_MASTER_PLAN.md)
+[![Protocol](https://img.shields.io/badge/protocol-OCP%20v0.1-7BC6FF?style=flat-square&labelColor=06090F)](./docs/OCP_STATUS.md)
+[![License](https://img.shields.io/badge/license-MIT-F4F1E8?style=flat-square&labelColor=06090F)](./LICENSE)
+
+</div>
+
+<br/>
+
+OCP is the layer that lets laptops, desktops, servers, GPU boxes, relays, and phones begin acting like **one practical distributed machine** without pretending to be one literal operating system.
+
+<br/>
+
+<p align="center">
+  <img src="./assets/ocp-architecture.svg" alt="OCP architecture layers" width="100%" />
+</p>
+
+<br/>
 
 ---
 
-## Why OCP Exists
+## The Problem
 
 Most systems make you choose between:
 
-- one machine with local control
-- or someone else’s cloud with centralized control
+- one machine, local control, limited power
+- or someone else's cloud, unlimited power, zero control
 
-OCP is trying to build a third thing:
+**OCP is building the third option.**
 
-**a governed mesh of your own devices and trusted peers**
-
-That means:
-
-- computation can move
-- artifacts can follow it
-- recovery can survive device failure
-- helpers can be enlisted when one machine is under pressure
-- operator approval can still matter
-- the system stays local-first, policy-aware, and legible
-
-OCP is not just “remote jobs.”
-It is the beginning of a sovereign compute layer.
+A governed mesh of your own devices and trusted peers, where computation can move, artifacts can follow it, recovery can survive device failure, and your phone can still govern what the system is allowed to do.
 
 ---
 
-## What It Can Do Now
+## What It Does
 
-The current standalone OCP already supports:
+When your workstation strains, the mesh notices. A helper laptop or GPU node is enlisted. The right workload shards move. Artifacts and checkpoints stay coherent. You remain in control from any device.
 
-- signed peer identity and handshake
-- peer discovery, manifests, registry, and sync
-- worker registration, polling, claiming, and heartbeats
-- durable queued execution
-- shell, Python, Docker, and WASM execution lanes
-- resumable recovery with checkpoints, resume, restart, and audit trails
-- artifact publishing, bundles, attestations, replication, graph replication, verification, and pinning
-- device profiles for `full`, `light`, `micro`, and `relay`
-- compute profiles with CPU, memory, disk, accelerator, GPU class, and VRAM hints
-- helper lifecycle controls:
-  - plan
-  - enlist
-  - drain
-  - retire
-  - auto-seek
-- mesh pressure reporting
+That is the difference between *scripts on a few boxes* and a real compute protocol.
+
+<br/>
+
+<details>
+<summary><strong>Full capability list</strong></summary>
+
+<br/>
+
+**Identity & Peers**
+- Signed peer identity and handshake
+- Peer discovery, manifests, registry, and sync
+
+**Execution**
+- Worker registration, polling, claiming, and heartbeats
+- Durable queued execution
+- Shell, Python, Docker, and WASM execution lanes
+- Resumable recovery with checkpoints, resume, restart, and audit trails
+
+**Artifacts**
+- Publishing, bundles, attestations, replication
+- Graph replication, verification, and pinning
+
+**Orchestration**
+- Device profiles: `full` · `light` · `micro` · `relay`
+- Compute profiles with CPU, memory, disk, GPU class, and VRAM hints
+- Mesh pressure reporting
 - GPU-aware cooperative task placement
-- trust-gated autonomous offload
-- durable offload preference memory
-- durable notifications and approvals
-- a mobile-friendly web control deck
-- cooperative tasks that spread one logical task across multiple peers
-- a first **Mission Layer** above jobs and cooperative tasks
+- Trust-gated autonomous offload
+- Durable offload preference memory
+
+**Helper Lifecycle**
+- Plan · Enlist · Drain · Retire · Auto-seek
+
+**Operator Layer**
+- Durable notifications and approvals
+- Mission layer above jobs and cooperative tasks
+- Mobile-friendly sovereign control deck
+
+</details>
 
 ---
 
@@ -73,123 +96,133 @@ The current standalone OCP already supports:
 
 OCP does not treat machines as anonymous disposable capacity.
 
-It treats them as **situated participants** in a trust-aware system:
+It treats them as **situated participants** in a trust-aware system.
 
-- some devices are powerful
-- some are private
-- some are fragile
-- some are approval-only
-- some are ideal helpers
-- some should only be touched with permission
+| Other systems | OCP |
+|---|---|
+| Blunt autoscaling | Helper enlistment |
+| Blind placement | Pressure-aware offload |
+| Job retries | Mission continuity |
+| Flat worker pool | Device classes |
+| Desktop-only control | Phone / watch operator |
 
-That worldview shows up in the runtime:
-
-- helper enlistment instead of blunt autoscaling
-- pressure-aware offload instead of blind placement
-- mission continuity instead of just job retries
-- device classes instead of one flat worker pool
-- phone/watch operator control instead of “desktop only”
+Some devices are powerful. Some are private. Some are fragile. Some are approval-only. Some should only be touched with permission. OCP knows the difference.
 
 ---
 
-## Architecture At A Glance
+## Architecture
 
 | Surface | Role |
 |---|---|
 | `mesh/sovereign.py` | Core OCP runtime: peers, jobs, missions, helpers, artifacts, recovery |
-| `runtime.py` | Standalone sqlite-backed substrate |
+| `runtime.py` | Standalone SQLite-backed substrate |
 | `server.py` | `/mesh/*` HTTP API and `/control` operator UI |
 | `docs/` | Protocol notes, status, and roadmap |
-| `tests/test_sovereign_mesh.py` | Regression suite |
+| `tests/test_sovereign_mesh.py` | Regression suite — 119 tests |
 
-Key runtime concepts:
+**Key runtime concepts:**
 
-- **Peers**: known remote nodes with trust and device profile state
-- **Jobs**: normalized bounded execution units
-- **Missions**: higher-level durable intent above jobs and cooperative tasks
-- **Cooperative Tasks**: one logical task split across multiple peers
-- **Artifacts**: bundles, checkpoints, logs, attestations, and replicated results
-- **Helpers**: extra devices enlisted when the local node is under pressure
-
----
-
-## Operator Experience
-
-OCP ships a built-in control surface:
-
-- `GET /control`
-
-From there, an operator can already inspect:
-
-- peer and helper state
-- queue and recovery status
-- approvals and notifications
-- cooperative tasks
-- mission cards
-- autonomy posture
-- offload memory
-
-The control deck is phone-friendly, so your phone can already act as a real operator console for the mesh.
+- **Peers** — known remote nodes with trust and device profile state
+- **Jobs** — normalized bounded execution units
+- **Missions** — durable higher-level intent above jobs and cooperative tasks
+- **Cooperative Tasks** — one logical task split across multiple peers
+- **Artifacts** — bundles, checkpoints, logs, attestations, and replicated results
+- **Helpers** — extra devices enlisted when the local node is under pressure
 
 ---
 
 ## Quick Start
-
-Run one local node:
 
 ```bash
 cd /Users/mespoy/Desktop/ocp
 python3 server.py --host 127.0.0.1 --port 8421
 ```
 
-Useful options:
+Then open the control deck:
 
-- `--db-path ./ocp.db`
-- `--identity-dir ./.mesh`
-- `--workspace-root .`
-- `--node-id alpha-node`
-- `--display-name "Alpha"`
-- `--device-class full`
-- `--form-factor workstation`
+```text
+http://127.0.0.1:8421/control
+```
 
-Then open:
+**Useful options:**
 
-- [http://127.0.0.1:8421/control](http://127.0.0.1:8421/control)
+```text
+--db-path         ./ocp.db
+--identity-dir    ./.mesh
+--workspace-root  .
+--node-id         alpha-node
+--display-name    "Alpha"
+--device-class    full
+--form-factor     workstation
+```
 
 ---
 
-## Test
+## Operator Control Deck
+
+OCP ships a built-in control surface at `GET /control`.
+
+The deck is phone-friendly, so your phone can act as a real operator console for the mesh. From there you can inspect and act on:
+
+- Peer and helper state
+- Queue and recovery status
+- Approvals and notifications
+- Cooperative tasks and missions
+- Autonomy posture
+- Offload memory
+
+---
+
+## Visual Identity
+
+This repo includes branded OCP graphics directly in source:
+
+- `assets/ocp-hero.svg`
+- `assets/ocp-architecture.svg`
+
+These are meant to give the project a clearer identity as:
+
+- a protocol
+- a mesh
+- a mission-oriented control layer
+- a sovereign alternative to anonymous cloud orchestration
+
+---
+
+## Tests
 
 ```bash
-cd /Users/mespoy/Desktop/ocp
 python3 -m unittest tests.test_sovereign_mesh
 python3 server.py --help
 ```
 
-Current baseline:
-
-- `tests.test_sovereign_mesh`: 117 tests passing
+Current baseline: **119 tests passing.**
 
 ---
 
-## Project Direction
+## Current Framing
 
-The repo is already past “protocol sketch” stage.
-
-The strongest near-term direction is:
-
-1. richer mission-centric operator UX
-2. stronger policy and treaty semantics for peer cooperation
-3. continuity-vessel evolution of checkpoints and recovery
-4. more expressive helper/GPU orchestration
-5. a more cinematic, more legible constellation-style cockpit
-
-If OCP keeps going in that direction, it becomes more than a scheduler.
-It becomes a practical sovereign compute layer for all your devices.
+- `OCP v0.1` — protocol and spec draft
+- `Sovereign Mesh` — Python-first reference implementation
+- `sovereign-mesh/v1` — current wire version
 
 ---
 
-## Related Notes
+## Direction
+
+The strongest near-term directions:
+
+1. Richer mission-centric operator UX
+2. Stronger policy and treaty semantics for peer cooperation
+3. Continuity-vessel evolution of checkpoints and recovery
+4. More expressive helper and GPU orchestration
+5. A more cinematic, legible constellation-style cockpit
+
+OCP is already past "protocol sketch" stage. If it keeps going in this direction, it becomes more than a scheduler. It becomes a practical sovereign compute layer for all your devices.
+
+---
+
+## Related
 
 - [Status](./docs/OCP_STATUS.md)
 - [Master Plan](./docs/OCP_MASTER_PLAN.md)
@@ -199,6 +232,11 @@ It becomes a practical sovereign compute layer for all your devices.
 
 ## Boundary
 
-OCP is standalone.
+OCP is standalone. It can integrate with other systems but is not a submodule of any of them and should not be described as one.
 
-It can integrate with Personal Mirror, Golem, or other systems, but it is not a submodule of them and should not be described as one.
+---
+
+<div align="center">
+<br/>
+<sub>sovereign · local-first · trust-aware · all your devices</sub>
+</div>

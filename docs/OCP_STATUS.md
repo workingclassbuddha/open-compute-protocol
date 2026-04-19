@@ -65,6 +65,7 @@ Related planning docs:
 - Durable approval inboxes with request, expiry, resolution, and linked notification records for app-neutral operator control
 - Mobile-first web control page for phone browsers with live peer, inbox, and approval actions backed by the native mesh endpoints
 - Stronger phone operator deck with queue/recovery cards, direct resume/restart/replay/cancel controls, and live auto-refresh
+- SSE-backed control stream for the cockpit so mission, queue, helper, approval, and notification updates can push into the deck without waiting for timer refreshes
 - Active peer seek/discovery with candidate tracking, optional auto-connect, and mesh-visible discovery records
 - Cooperative task groups that fan one logical task into multiple child jobs across local and remote peers
 - Aggregated cooperative-task state with child-job summaries so multiple machines can act on one larger job together
@@ -148,6 +149,7 @@ Related planning docs:
 
 - Manifest: `GET /mesh/manifest`
 - Phone control UI: `GET /control`
+- Phone control stream: `GET /mesh/control/stream`
 - Device profile: `GET /mesh/device-profile`
 - Peer stream snapshot: `GET /mesh/stream`
 - Peer registry: `GET /mesh/peers`
@@ -228,4 +230,4 @@ python3 -m unittest tests.test_sovereign_mesh
 ```
 
 Current standalone baseline:
-- `tests.test_sovereign_mesh`: 117 tests passing
+- `tests.test_sovereign_mesh`: 119 tests passing

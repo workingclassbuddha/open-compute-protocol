@@ -1,0 +1,48 @@
+<svg width="1600" height="980" viewBox="0 0 1600 980" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="160" y1="40" x2="1420" y2="940" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0A111A"/>
+      <stop offset="0.5" stop-color="#0F2030"/>
+      <stop offset="1" stop-color="#09080C"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="320" y1="0" x2="1280" y2="980" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6AF3DE"/>
+      <stop offset="0.5" stop-color="#8AB5FF"/>
+      <stop offset="1" stop-color="#FF956C"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1600" height="980" rx="34" fill="url(#bg)"/>
+
+  <g font-family="Avenir Next, Inter, Helvetica, Arial, sans-serif">
+    <text x="120" y="124" font-size="60" font-weight="700" fill="#F3F8FF">OCP Architecture</text>
+    <text x="120" y="168" font-size="24" fill="#AFC3D9">How the current standalone mesh is layered today.</text>
+
+    <rect x="120" y="230" width="1360" height="108" rx="24" fill="#0F1A27" stroke="#6AF3DE" stroke-opacity="0.34"/>
+    <text x="164" y="276" font-size="20" letter-spacing="3" fill="#79EBDD">OPERATOR SURFACES</text>
+    <text x="164" y="318" font-size="34" font-weight="700" fill="#F3F8FF">/control cockpit, phone UI, approvals, notifications, mission cards</text>
+
+    <rect x="120" y="386" width="1360" height="128" rx="24" fill="#121B29" stroke="#8AB5FF" stroke-opacity="0.34"/>
+    <text x="164" y="432" font-size="20" letter-spacing="3" fill="#95B7FF">MISSION + POLICY LAYER</text>
+    <text x="164" y="474" font-size="34" font-weight="700" fill="#F3F8FF">missions, autonomy posture, helper memory, pressure, trust-gated offload</text>
+
+    <rect x="120" y="562" width="650" height="154" rx="24" fill="#131C29" stroke="#F99D73" stroke-opacity="0.34"/>
+    <text x="164" y="608" font-size="20" letter-spacing="3" fill="#FFB38F">EXECUTION PLANE</text>
+    <text x="164" y="650" font-size="32" font-weight="700" fill="#F3F8FF">jobs, queues, workers, retries, checkpoints, resume, restart</text>
+    <text x="164" y="692" font-size="22" fill="#BED0E2">shell.command / python.inline / docker.container / wasm.component</text>
+
+    <rect x="830" y="562" width="650" height="154" rx="24" fill="#131C29" stroke="#6AF3DE" stroke-opacity="0.34"/>
+    <text x="874" y="608" font-size="20" letter-spacing="3" fill="#79EBDD">COOPERATIVE + DEVICE PLANE</text>
+    <text x="874" y="650" font-size="32" font-weight="700" fill="#F3F8FF">cooperative tasks, helpers, device profiles, GPU-aware placement</text>
+    <text x="874" y="692" font-size="22" fill="#BED0E2">full / light / micro / relay + CPU / memory / disk / GPU hints</text>
+
+    <rect x="120" y="764" width="1360" height="112" rx="24" fill="#101723" stroke="#8AB5FF" stroke-opacity="0.24"/>
+    <text x="164" y="810" font-size="20" letter-spacing="3" fill="#95B7FF">ARTIFACT + CONTINUITY PLANE</text>
+    <text x="164" y="852" font-size="32" font-weight="700" fill="#F3F8FF">bundles, attestations, logs, replication, graph sync, mirror verification, pinning</text>
+
+    <path d="M800 338V386" stroke="url(#edge)" stroke-width="4" stroke-linecap="round"/>
+    <path d="M800 514V562" stroke="url(#edge)" stroke-width="4" stroke-linecap="round"/>
+    <path d="M446 716V764" stroke="url(#edge)" stroke-width="4" stroke-linecap="round"/>
+    <path d="M1154 716V764" stroke="url(#edge)" stroke-width="4" stroke-linecap="round"/>
+  </g>
+</svg>

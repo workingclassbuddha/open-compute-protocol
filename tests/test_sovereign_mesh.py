@@ -146,6 +146,15 @@ def make_mesh_http_server(mesh):
             self.end_headers()
             self.wfile.write(raw)
 
+        def _send_sse(self, event_name, payload, event_id=""):
+            if event_id:
+                self.wfile.write(f"id: {event_id}\n".encode("utf-8"))
+            self.wfile.write(f"event: {event_name}\n".encode("utf-8"))
+            for line in json.dumps(payload).splitlines():
+                self.wfile.write(f"data: {line}\n".encode("utf-8"))
+            self.wfile.write(b"\n")
+            self.wfile.flush()
+
         def do_GET(self):
             parsed = urlparse(self.path)
             path = parsed.path
@@ -153,6 +162,18 @@ def make_mesh_http_server(mesh):
             try:
                 if path in {"/", "/control", "/control/mobile"}:
                     self._send_html(server.build_control_page(mesh))
+                    return
+                if path == "/mesh/control/stream":
+                    since = int(params.get("since", ["0"])[0])
+                    limit = int(params.get("limit", ["50"])[0])
+                    envelope = server.build_control_stream_payload(mesh, since_seq=since, limit=limit)
+                    cursor = int(envelope.get("cursor") or since or 0)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    self._send_sse("stream-open", {"status": "ok", "cursor": cursor, "route": "/mesh/control/stream"}, event_id=str(cursor))
+                    self._send_sse("control-state", envelope, event_id=str(cursor))
                     return
                 if path == "/mesh/manifest":
                     self._send_json(mesh.get_manifest())
@@ -4146,6 +4167,7 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("Restart Mission", probe.payload)
         self.assertIn(checkpointed_mission["mission"]["id"], probe.payload)
         self.assertIn("Cancel Job", probe.payload)
+        self.assertIn("/mesh/control/stream", probe.payload)
         self.assertIn("/mesh/notifications", probe.payload)
 
     def test_server_mesh_device_profile_handlers_round_trip_profile(self):
@@ -4319,9 +4341,62 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("Result Bundle", markup)
         self.assertIn("/mesh/artifacts/", markup)
         self.assertIn("/mesh/jobs/", markup)
+        self.assertIn("/mesh/control/stream", markup)
         self.assertIn("Cancel Job", markup)
         self.assertIn("Refresh Deck", markup)
         self.assertIn("ocp-mobile-ui", markup)
+
+    def test_control_stream_payload_includes_state_and_recent_events(self):
+        alpha = self.make_stack("alpha")
+        alpha.mesh.launch_mission(
+            title="Stream Mission",
+            intent="Verify control stream payload",
+            request_id="control-stream-payload",
+            job={
+                "kind": "python.inline",
+                "dispatch_mode": "queued",
+                "requirements": {"capabilities": ["python"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "payload": {"code": "print('stream mission')"},
+            },
+        )
+
+        payload = server.build_control_stream_payload(alpha.mesh, since_seq=0, limit=20)
+
+        self.assertEqual(payload["type"], "control_state")
+        self.assertIn("state", payload)
+        self.assertIn("control_stream", payload["state"])
+        self.assertEqual(payload["state"]["control_stream"]["route"], "/mesh/control/stream")
+        self.assertGreaterEqual(payload["cursor"], 1)
+        self.assertTrue(any(event["event_type"] == "mesh.mission.launched" for event in payload["events"]))
+        self.assertEqual(payload["state"]["missions"]["missions"][0]["title"], "Stream Mission")
+
+    def test_control_stream_is_exposed_over_http(self):
+        alpha = self.make_stack("alpha")
+        alpha.mesh.launch_mission(
+            title="HTTP Stream Mission",
+            intent="Expose control stream state over HTTP",
+            request_id="control-stream-http",
+            job={
+                "kind": "python.inline",
+                "dispatch_mode": "queued",
+                "requirements": {"capabilities": ["python"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "payload": {"code": "print('stream http mission')"},
+            },
+        )
+        alpha_client, base_url = self.serve_mesh(alpha)
+        self.assertIsNotNone(alpha_client)
+
+        with urlopen(f"{base_url}/mesh/control/stream?since=0&limit=20&once=1") as response:
+            body = response.read().decode("utf-8")
+            content_type = response.headers.get("Content-Type")
+
+        self.assertEqual(content_type, "text/event-stream")
+        self.assertIn("event: stream-open", body)
+        self.assertIn("event: control-state", body)
+        self.assertIn("HTTP Stream Mission", body)
+        self.assertIn("mesh.mission.launched", body)
 
     def test_mission_launch_wraps_local_job_and_tracks_completion(self):
         beta = self.make_stack("beta")
