@@ -480,12 +480,14 @@ def build_control_page(mesh: SovereignMesh) -> str:
   <style>
     :root {
       --ocp-bg: #03060f;
+      --ocp-bg-deep: #02040a;
       --ocp-surface: rgba(6, 9, 15, 0.92);
       --ocp-surface-strong: rgba(8, 13, 24, 0.94);
       --ocp-surface-soft: rgba(255, 255, 255, 0.025);
       --ocp-grid: rgba(255, 255, 255, 0.04);
       --ocp-line: rgba(255, 255, 255, 0.07);
       --ocp-line-soft: rgba(255, 255, 255, 0.05);
+      --ocp-line-strong: rgba(255, 255, 255, 0.14);
       --ocp-gold: #c8a96e;
       --ocp-cyan: #00d4ff;
       --ocp-green: #00ff88;
@@ -499,6 +501,7 @@ def build_control_page(mesh: SovereignMesh) -> str:
       --ocp-radius-md: 16px;
       --ocp-radius-sm: 12px;
       --ocp-shadow: 0 24px 60px rgba(0, 0, 0, 0.32);
+      --ocp-shadow-soft: 0 18px 38px rgba(0, 0, 0, 0.24);
       --ocp-transition: 200ms ease;
       --ocp-max-width: 1440px;
       --ocp-hero-height: 72px;
@@ -513,9 +516,11 @@ def build_control_page(mesh: SovereignMesh) -> str:
       margin: 0;
       min-height: 100vh;
       background:
-        radial-gradient(circle at center, rgba(18, 28, 52, 0.65) 0%, rgba(3, 6, 15, 0) 42%),
+        radial-gradient(circle at top left, rgba(200, 169, 110, 0.12), transparent 22%),
+        radial-gradient(circle at center, rgba(18, 28, 52, 0.68) 0%, rgba(3, 6, 15, 0) 42%),
+        radial-gradient(circle at bottom right, rgba(0, 212, 255, 0.12), transparent 24%),
         linear-gradient(180deg, rgba(0, 212, 255, 0.06), transparent 28%),
-        var(--ocp-bg);
+        linear-gradient(180deg, var(--ocp-bg) 0%, var(--ocp-bg-deep) 100%);
       color: var(--ocp-text);
       font-family: "Inter", sans-serif;
       padding-bottom: 88px;
@@ -559,8 +564,19 @@ def build_control_page(mesh: SovereignMesh) -> str:
       min-height: var(--ocp-hero-height);
       padding: 14px 0 12px;
       backdrop-filter: blur(24px);
-      background: rgba(6, 9, 15, 0.96);
+      background:
+        linear-gradient(180deg, rgba(5, 8, 14, 0.98), rgba(5, 8, 14, 0.92));
       border-bottom: 0.5px solid var(--ocp-line);
+    }
+    .ocp-hero::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: -1px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.32), transparent);
+      pointer-events: none;
     }
     .ocp-hero__bar {
       display: grid;
@@ -568,10 +584,12 @@ def build_control_page(mesh: SovereignMesh) -> str:
       grid-template-columns: 1fr;
       align-items: center;
       padding: 10px 14px;
-      border: 0.5px solid var(--ocp-line);
-      border-radius: 18px;
-      background: linear-gradient(135deg, rgba(7, 12, 22, 0.98), rgba(5, 9, 17, 0.9));
-      box-shadow: var(--ocp-shadow);
+      border: 0.5px solid var(--ocp-line-strong);
+      border-radius: 24px;
+      background:
+        radial-gradient(circle at top right, rgba(0, 212, 255, 0.14), transparent 24%),
+        linear-gradient(135deg, rgba(10, 16, 29, 0.98), rgba(4, 8, 15, 0.94));
+      box-shadow: var(--ocp-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.05);
     }
     .ocp-hero__cluster {
       display: flex;
@@ -589,8 +607,8 @@ def build_control_page(mesh: SovereignMesh) -> str:
     .ocp-node-name {
       margin: 0;
       font-family: "Space Grotesk", sans-serif;
-      font-size: 15px;
-      font-weight: 600;
+      font-size: 17px;
+      font-weight: 700;
       letter-spacing: 0.01em;
       white-space: nowrap;
       overflow: hidden;
@@ -664,7 +682,7 @@ def build_control_page(mesh: SovereignMesh) -> str:
     .ocp-version {
       font-size: 10px;
       color: var(--ocp-text-secondary);
-      letter-spacing: 0.08em;
+      letter-spacing: 0.16em;
       text-transform: uppercase;
     }
     .ocp-mesh {
@@ -771,10 +789,103 @@ def build_control_page(mesh: SovereignMesh) -> str:
       color: var(--ocp-text-secondary);
       font-size: 12px;
     }
+    .ocp-hero__deck {
+      display: grid;
+      gap: 14px;
+      padding: 4px 2px 0;
+    }
+    .ocp-hero-story {
+      display: grid;
+      gap: 6px;
+      padding: 16px 18px;
+      border-radius: 18px;
+      border: 0.5px solid rgba(255, 255, 255, 0.08);
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018));
+      box-shadow: var(--ocp-shadow-soft);
+    }
+    .ocp-hero-story__kicker {
+      color: var(--ocp-gold);
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    .ocp-hero-story__body {
+      margin: 0;
+      font-family: "Space Grotesk", sans-serif;
+      font-size: 16px;
+      line-height: 1.55;
+      max-width: 920px;
+    }
+    .ocp-command-ribbon {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .ocp-command-ribbon__card {
+      position: relative;
+      display: grid;
+      gap: 10px;
+      min-height: 132px;
+      padding: 16px;
+      border-radius: 20px;
+      border: 0.5px solid rgba(255, 255, 255, 0.08);
+      background:
+        radial-gradient(circle at top right, rgba(255, 255, 255, 0.07), transparent 32%),
+        linear-gradient(165deg, rgba(11, 17, 30, 0.96), rgba(6, 10, 18, 0.92));
+      overflow: hidden;
+      box-shadow: var(--ocp-shadow-soft);
+      transition: transform var(--ocp-transition), border-color var(--ocp-transition), box-shadow var(--ocp-transition);
+    }
+    .ocp-command-ribbon__card::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 3px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.14);
+    }
+    .ocp-command-ribbon__card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(255, 255, 255, 0.14);
+      box-shadow: 0 20px 48px rgba(0, 0, 0, 0.3);
+    }
+    .ocp-command-ribbon__card.is-cyan::before {
+      background: var(--ocp-cyan);
+    }
+    .ocp-command-ribbon__card.is-warn::before {
+      background: var(--ocp-amber);
+    }
+    .ocp-command-ribbon__card.is-danger::before {
+      background: var(--ocp-coral);
+    }
+    .ocp-command-ribbon__card.is-safe::before {
+      background: var(--ocp-green);
+    }
+    .ocp-command-ribbon__label {
+      color: var(--ocp-text-dim);
+      font-size: 9px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    .ocp-command-ribbon__value {
+      font-family: "Space Grotesk", sans-serif;
+      font-size: 34px;
+      line-height: 1;
+      font-weight: 700;
+    }
+    .ocp-command-ribbon__detail {
+      color: var(--ocp-text-secondary);
+      font-size: 13px;
+      line-height: 1.6;
+    }
     .ocp-toolbar {
       display: inline-flex;
       gap: 10px;
       align-items: center;
+      flex-wrap: wrap;
     }
     .ocp-button,
     .ocp-link-button,
@@ -855,14 +966,15 @@ def build_control_page(mesh: SovereignMesh) -> str:
     .ocp-main {
       display: grid;
       grid-template-columns: 1fr;
-      gap: 18px;
-      padding-top: 18px;
+      gap: 20px;
+      padding-top: 22px;
     }
     .ocp-panorama {
       margin-top: 18px;
       padding-bottom: 20px;
       background:
         radial-gradient(circle at top right, rgba(0, 212, 255, 0.1), transparent 34%),
+        radial-gradient(circle at top left, rgba(200, 169, 110, 0.08), transparent 28%),
         linear-gradient(180deg, rgba(12, 20, 37, 0.98), rgba(5, 9, 16, 0.94));
     }
     .ocp-panorama__layout {
@@ -873,10 +985,12 @@ def build_control_page(mesh: SovereignMesh) -> str:
     .ocp-panorama-feed {
       position: relative;
       z-index: 1;
-      border-radius: 18px;
+      border-radius: 24px;
       border: 0.5px solid rgba(255, 255, 255, 0.08);
-      background: rgba(255, 255, 255, 0.025);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
       overflow: hidden;
+      box-shadow: var(--ocp-shadow-soft);
     }
     .ocp-panorama__summary {
       padding: 16px;
@@ -889,10 +1003,11 @@ def build_control_page(mesh: SovereignMesh) -> str:
     .ocp-panorama-card {
       position: relative;
       overflow: hidden;
-      padding: 14px;
-      border-radius: 16px;
+      padding: 16px;
+      border-radius: 18px;
       border: 0.5px solid rgba(255, 255, 255, 0.06);
-      background: rgba(255, 255, 255, 0.03);
+      background:
+        linear-gradient(155deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
       min-height: 110px;
     }
     .ocp-panorama-card::before {
@@ -948,10 +1063,10 @@ def build_control_page(mesh: SovereignMesh) -> str:
     .ocp-panorama-headline {
       display: grid;
       gap: 6px;
-      padding: 14px 16px;
-      border-radius: 16px;
+      padding: 16px 18px;
+      border-radius: 18px;
       border: 0.5px solid rgba(255, 255, 255, 0.06);
-      background: linear-gradient(135deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015));
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.042), rgba(255, 255, 255, 0.015));
     }
     .ocp-panorama-headline__label {
       color: var(--ocp-text-dim);
@@ -974,7 +1089,7 @@ def build_control_page(mesh: SovereignMesh) -> str:
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      padding: 16px 16px 12px;
+      padding: 18px 18px 14px;
       border-bottom: 0.5px solid rgba(255, 255, 255, 0.06);
     }
     .ocp-panorama-feed__list {
@@ -987,16 +1102,17 @@ def build_control_page(mesh: SovereignMesh) -> str:
       grid-template-columns: 4px minmax(0, 1fr);
       gap: 14px;
       align-items: stretch;
-      padding: 14px 16px;
+      padding: 16px 18px;
       text-decoration: none;
       color: inherit;
       border-top: 0.5px solid rgba(255, 255, 255, 0.05);
       background: rgba(255, 255, 255, 0.015);
-      transition: background var(--ocp-transition), transform var(--ocp-transition), border-color var(--ocp-transition);
+      transition: background var(--ocp-transition), transform var(--ocp-transition), border-color var(--ocp-transition), box-shadow var(--ocp-transition);
     }
     .ocp-panorama-feed__row:hover {
       background: rgba(255, 255, 255, 0.04);
       transform: translateY(-1px);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
     }
     .ocp-panorama-feed__row.is-fresh {
       background: linear-gradient(90deg, rgba(0, 212, 255, 0.08), rgba(255, 255, 255, 0.015));
@@ -1117,11 +1233,12 @@ def build_control_page(mesh: SovereignMesh) -> str:
     .ocp-section {
       position: relative;
       overflow: hidden;
-      padding: 18px;
+      padding: 20px;
       border-radius: var(--ocp-radius-lg);
-      border: 0.5px solid var(--ocp-line);
+      border: 0.5px solid rgba(255, 255, 255, 0.09);
       background:
-        linear-gradient(180deg, rgba(8, 12, 21, 0.92), rgba(5, 9, 16, 0.9));
+        radial-gradient(circle at top right, rgba(255, 255, 255, 0.045), transparent 30%),
+        linear-gradient(180deg, rgba(8, 12, 21, 0.94), rgba(5, 9, 16, 0.92));
       box-shadow: var(--ocp-shadow);
       opacity: 0;
       transform: translateY(12px);
@@ -1145,20 +1262,22 @@ def build_control_page(mesh: SovereignMesh) -> str:
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 14px;
+      gap: 16px;
+      margin-bottom: 18px;
     }
     .ocp-section__title {
       margin: 0;
       font-family: "Space Grotesk", sans-serif;
-      font-size: 18px;
-      font-weight: 600;
+      font-size: 21px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
     }
     .ocp-section__subtitle {
-      margin: 6px 0 0;
+      margin: 8px 0 0;
       color: var(--ocp-text-secondary);
       font-size: 13px;
-      line-height: 1.5;
+      line-height: 1.65;
+      max-width: 66ch;
     }
     .ocp-error {
       display: none;
@@ -1240,10 +1359,10 @@ def build_control_page(mesh: SovereignMesh) -> str:
       display: flex;
       justify-content: space-between;
       gap: 12px;
-      padding: 12px 14px;
-      border-radius: 14px;
+      padding: 14px 16px;
+      border-radius: 16px;
       border: 0.5px solid var(--ocp-line-soft);
-      background: rgba(255, 255, 255, 0.03);
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
     }
     .ocp-readiness__item strong {
       font-family: "Space Grotesk", sans-serif;
@@ -1261,10 +1380,10 @@ def build_control_page(mesh: SovereignMesh) -> str:
       margin-top: 4px;
     }
     .ocp-metric-pill {
-      padding: 12px;
-      border-radius: 14px;
+      padding: 14px;
+      border-radius: 16px;
       border: 0.5px solid var(--ocp-line-soft);
-      background: rgba(255, 255, 255, 0.03);
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
     }
     .ocp-metric-pill__label {
       display: block;
@@ -1300,11 +1419,14 @@ def build_control_page(mesh: SovereignMesh) -> str:
     .ocp-helper-card,
     .ocp-peer-card {
       position: relative;
-      padding: 16px;
-      border-radius: var(--ocp-radius-sm);
+      padding: 18px;
+      border-radius: 18px;
       border: 0.5px solid rgba(255, 255, 255, 0.06);
-      background: rgba(255, 255, 255, 0.025);
+      background:
+        radial-gradient(circle at top right, rgba(0, 212, 255, 0.08), transparent 28%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.022));
       min-width: 0;
+      box-shadow: var(--ocp-shadow-soft);
     }
     .ocp-helper-card__top,
     .ocp-peer-card__top {
@@ -1438,10 +1560,11 @@ def build_control_page(mesh: SovereignMesh) -> str:
     .ocp-offload-table,
     .ocp-notification-list {
       display: grid;
-      gap: 0;
-      border-radius: 16px;
-      border: 0.5px solid var(--ocp-line);
-      overflow: hidden;
+      gap: 10px;
+      border-radius: 0;
+      border: 0;
+      overflow: visible;
+      background: transparent;
     }
     .ocp-task-row,
     .ocp-operation-row,
@@ -1450,21 +1573,27 @@ def build_control_page(mesh: SovereignMesh) -> str:
       display: grid;
       gap: 12px;
       align-items: center;
-      padding: 14px 16px;
-      background: rgba(255, 255, 255, 0.015);
-      border-top: 0.5px solid rgba(255, 255, 255, 0.04);
+      padding: 16px 18px;
+      border-radius: 18px;
+      border: 0.5px solid rgba(255, 255, 255, 0.07);
+      background:
+        linear-gradient(160deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.016));
+      box-shadow: var(--ocp-shadow-soft);
     }
     .ocp-task-row:nth-child(even),
     .ocp-operation-row:nth-child(even),
     .ocp-offload-row:nth-child(even),
     .ocp-notification-row:nth-child(even) {
-      background: transparent;
+      background:
+        linear-gradient(160deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012));
     }
     .ocp-task-row:hover,
     .ocp-operation-row:hover,
     .ocp-offload-row:hover,
     .ocp-notification-row:hover {
-      background: rgba(255, 255, 255, 0.03);
+      background:
+        linear-gradient(160deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.022));
+      border-color: rgba(255, 255, 255, 0.12);
     }
     .ocp-task-row {
       grid-template-columns: 18px minmax(0, 1fr);
@@ -1492,16 +1621,17 @@ def build_control_page(mesh: SovereignMesh) -> str:
       color: var(--ocp-text);
     }
     .ocp-progress {
-      height: 6px;
+      height: 8px;
       border-radius: 999px;
       overflow: hidden;
-      background: rgba(255, 255, 255, 0.06);
+      background: rgba(255, 255, 255, 0.08);
     }
     .ocp-progress > span {
       display: block;
       height: 100%;
       border-radius: inherit;
       background: linear-gradient(90deg, var(--ocp-cyan), var(--ocp-green));
+      box-shadow: 0 0 18px rgba(0, 212, 255, 0.16);
     }
     .ocp-task-meta,
     .ocp-operation-meta {
@@ -1577,11 +1707,12 @@ def build_control_page(mesh: SovereignMesh) -> str:
       gap: 12px;
       padding: 16px;
       border-left: 2px solid rgba(255, 149, 0, 0.72);
-      border-radius: 16px;
-      background: rgba(255, 255, 255, 0.025);
+      border-radius: 18px;
+      background: linear-gradient(165deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
       border-top: 0.5px solid var(--ocp-line-soft);
       border-right: 0.5px solid var(--ocp-line-soft);
       border-bottom: 0.5px solid var(--ocp-line-soft);
+      box-shadow: var(--ocp-shadow-soft);
     }
     .ocp-approval-card.is-dim {
       opacity: 0.56;
@@ -1693,13 +1824,14 @@ def build_control_page(mesh: SovereignMesh) -> str:
     .ocp-inspect-panel {
       position: relative;
       z-index: 1;
-      width: min(680px, 100vw);
+      width: min(760px, 100vw);
       height: 100vh;
       overflow-y: auto;
-      padding: 22px 18px 32px;
+      padding: 24px 20px 36px;
       background:
-        radial-gradient(circle at top right, rgba(0, 212, 255, 0.12), transparent 28%),
-        linear-gradient(180deg, rgba(12, 18, 33, 0.98), rgba(6, 10, 19, 0.98));
+        radial-gradient(circle at top right, rgba(0, 212, 255, 0.16), transparent 24%),
+        radial-gradient(circle at top left, rgba(200, 169, 110, 0.12), transparent 20%),
+        linear-gradient(180deg, rgba(12, 18, 33, 0.985), rgba(6, 10, 19, 0.985));
       border-left: 0.5px solid rgba(255, 255, 255, 0.08);
       box-shadow: -24px 0 64px rgba(0, 0, 0, 0.34);
       transform: translateX(24px);
@@ -1713,7 +1845,13 @@ def build_control_page(mesh: SovereignMesh) -> str:
       align-items: flex-start;
       justify-content: space-between;
       gap: 16px;
-      margin-bottom: 16px;
+      margin-bottom: 18px;
+      position: sticky;
+      top: -24px;
+      z-index: 2;
+      padding: 0 0 12px;
+      background: linear-gradient(180deg, rgba(10, 15, 28, 0.98), rgba(10, 15, 28, 0.8), transparent);
+      backdrop-filter: blur(12px);
     }
     .ocp-inspect-panel__title {
       margin: 8px 0 0;
@@ -1743,10 +1881,12 @@ def build_control_page(mesh: SovereignMesh) -> str:
       color: var(--ocp-text-secondary);
     }
     .ocp-inspect-section {
-      padding: 16px;
-      border-radius: 18px;
+      padding: 18px;
+      border-radius: 20px;
       border: 0.5px solid rgba(255, 255, 255, 0.06);
-      background: rgba(255, 255, 255, 0.03);
+      background:
+        linear-gradient(160deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.022));
+      box-shadow: var(--ocp-shadow-soft);
     }
     .ocp-inspect-section__title {
       margin: 0 0 12px;
@@ -1760,10 +1900,10 @@ def build_control_page(mesh: SovereignMesh) -> str:
       gap: 10px;
     }
     .ocp-inspect-stat {
-      padding: 12px;
-      border-radius: 14px;
+      padding: 14px;
+      border-radius: 16px;
       border: 0.5px solid rgba(255, 255, 255, 0.06);
-      background: rgba(255, 255, 255, 0.025);
+      background: rgba(255, 255, 255, 0.028);
     }
     .ocp-inspect-stat__label {
       display: block;
@@ -1792,10 +1932,10 @@ def build_control_page(mesh: SovereignMesh) -> str:
     .ocp-inspect-item {
       display: grid;
       gap: 8px;
-      padding: 12px;
-      border-radius: 14px;
+      padding: 14px;
+      border-radius: 16px;
       border: 0.5px solid rgba(255, 255, 255, 0.06);
-      background: rgba(255, 255, 255, 0.025);
+      background: rgba(255, 255, 255, 0.028);
     }
     .ocp-inspect-item__head {
       display: flex;
@@ -1862,12 +2002,12 @@ def build_control_page(mesh: SovereignMesh) -> str:
       color: var(--ocp-text-secondary);
     }
     .ocp-empty {
-      padding: 18px;
-      border-radius: 16px;
+      padding: 20px;
+      border-radius: 18px;
       border: 0.5px dashed rgba(255, 255, 255, 0.12);
       text-align: center;
       color: var(--ocp-text-secondary);
-      background: rgba(255, 255, 255, 0.02);
+      background: linear-gradient(160deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.016));
       font-size: 13px;
       line-height: 1.6;
     }
@@ -1938,6 +2078,9 @@ def build_control_page(mesh: SovereignMesh) -> str:
       .ocp-hero__bar {
         grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto;
       }
+      .ocp-command-ribbon {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
       .ocp-hero__cluster--center,
       .ocp-hero__cluster--right {
         justify-content: center;
@@ -1967,6 +2110,9 @@ def build_control_page(mesh: SovereignMesh) -> str:
       .ocp-app {
         padding-left: 24px;
         padding-right: 24px;
+      }
+      .ocp-hero-story__body {
+        font-size: 18px;
       }
       .ocp-panorama__layout {
         grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
