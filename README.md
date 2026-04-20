@@ -10,7 +10,8 @@
 
 **A sovereign, local-first compute fabric for trusted devices.**
 
-[![Tests](https://img.shields.io/badge/tests-119%20passing-00FF88?style=flat-square&labelColor=06090F)](./tests/test_sovereign_mesh.py)
+[![Tests](https://img.shields.io/badge/tests-136%20passing-00FF88?style=flat-square&labelColor=06090F)](./tests/test_sovereign_mesh.py)
+[![Release](https://img.shields.io/badge/release-v0.1.1-F6C177?style=flat-square&labelColor=06090F)](./README.md#current-status)
 [![Version](https://img.shields.io/badge/wire%20version-sovereign--mesh%2Fv1-00D4FF?style=flat-square&labelColor=06090F)](./docs/OCP_STATUS.md)
 [![Status](https://img.shields.io/badge/status-active%20development-C8A96E?style=flat-square&labelColor=06090F)](./docs/OCP_MASTER_PLAN.md)
 [![Protocol](https://img.shields.io/badge/protocol-OCP%20v0.1-7BC6FF?style=flat-square&labelColor=06090F)](./docs/OCP_STATUS.md)
@@ -114,11 +115,19 @@ Some devices are powerful. Some are private. Some are fragile. Some are approval
 
 | Surface | Role |
 |---|---|
-| `mesh/sovereign.py` | Core OCP runtime: peers, jobs, missions, helpers, artifacts, recovery |
+| `mesh/sovereign.py` | Compatibility-preserving façade and orchestrator |
+| `mesh_protocol/` | Signed envelopes, request IDs, handshake contracts, protocol errors |
+| `mesh_state/` | SQLite-backed state helpers, projections, event and secret access |
+| `mesh_scheduler/` | Placement, scoring, trust, backlog, helper, and GPU-aware selection |
+| `mesh_execution/` | Runtime adapters, env and secret binding, submission, result packaging |
+| `mesh_artifacts/` | Content-addressed artifacts, bundles, attestations, replication, pinning |
+| `mesh_missions/` | Mission lifecycle, continuity, checkpoints, resume, and restart |
+| `mesh_helpers/` | Helper lifecycle, offload preferences, autonomous helper evaluation |
+| `mesh_governance/` | Notifications, approvals, and governance/policy helpers |
 | `runtime.py` | Standalone SQLite-backed substrate |
 | `server.py` | `/mesh/*` HTTP API and `/control` operator UI |
 | `docs/` | Protocol notes, status, and roadmap |
-| `tests/test_sovereign_mesh.py` | Regression suite — 119 tests |
+| `tests/test_sovereign_mesh.py` | Regression suite — 136 tests |
 
 **Key runtime concepts:**
 
@@ -240,13 +249,20 @@ python3 -m unittest tests.test_sovereign_mesh
 python3 server.py --help
 ```
 
-Current baseline: **119 tests passing.**
+Current baseline: **136 tests passing.**
 
 ---
 
 ## Current Status
 
-**Implemented today**
+**Released in v0.1.1**
+
+- protocol-kernel refactor that extracts real subsystem seams for protocol, state, scheduler, execution, artifacts, missions, helpers, and governance
+- `SovereignMesh` retained as the stable façade so routes, persistence, and current behavior stay compatible
+- execution boundary now owns runtime adapters, job submission and acceptance orchestration, and result packaging
+- broad regression suite remains green at 136 passing tests
+
+**Implemented in the current runtime**
 
 - standalone local node startup
 - peer identity, manifests, sync, and discovery
@@ -265,6 +281,7 @@ Current baseline: **119 tests passing.**
 ## Current Framing
 
 - `OCP v0.1` — protocol and spec draft
+- `v0.1.1` — current implementation release
 - `Sovereign Mesh` — Python-first reference implementation
 - `sovereign-mesh/v1` — current wire version
 

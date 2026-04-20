@@ -1,0 +1,9 @@
+PROTOCOL_NAME = "Open Compute Protocol"
+PROTOCOL_SHORT_NAME = "OCP"
+PROTOCOL_RELEASE = "0.1"
+IMPLEMENTATION_NAME = "Sovereign Mesh"
+PROTOCOL_VERSION = "sovereign-mesh/v1"
+MAX_CLOCK_SKEW_SECONDS = 300
+OCI_MANIFEST_MEDIA_TYPE = "application/vnd.oci.image.manifest.v1+json"
+OCP_RESULT_CONFIG_MEDIA_TYPE = "application/vnd.ocp.job-result.config.v1+json"
+OCP_RESULT_ARTIFACT_TYPE = "application/vnd.ocp.job-result.v1"

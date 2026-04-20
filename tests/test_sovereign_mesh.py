@@ -1070,6 +1070,88 @@ class SovereignMeshTests(unittest.TestCase):
         with self.assertRaises(MeshSignatureError):
             beta.mesh.accept_handshake(tampered)
 
+    def test_mesh_exposes_protocol_scheduler_and_artifact_services(self):
+        beta = self.make_stack("beta")
+
+        envelope = beta.mesh.protocol.build_signed_envelope(
+            "/mesh/jobs/submit",
+            {"job": {"kind": "custom.inline"}},
+        )
+        self.assertEqual(envelope["request"]["node_id"], "beta-node")
+
+        artifact = beta.mesh.artifacts.publish_local_artifact(
+            {"hello": "world"},
+            metadata={"artifact_kind": "bundle"},
+        )
+        fetched = beta.mesh.get_artifact(artifact["id"], include_content=False)
+        self.assertEqual(fetched["id"], artifact["id"])
+
+        decision = beta.mesh.scheduler.select_execution_target(
+            {"kind": "custom.inline", "policy": {"classification": "trusted", "mode": "batch"}},
+            allow_remote=False,
+        )
+        self.assertEqual(decision["status"], "placed")
+        self.assertEqual(decision["selected"]["target_type"], "local")
+
+    def test_mesh_exposes_execution_service_for_agent_echo(self):
+        beta = self.make_stack("beta-exec")
+
+        executor, result, metadata = beta.mesh.execution.execute_job(
+            {"kind": "agent.echo", "policy": {"classification": "trusted", "mode": "batch"}},
+            payload={"message": "hello"},
+        )
+
+        self.assertEqual(executor, "agent-runtime")
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["echo"]["message"], "hello")
+        self.assertEqual(metadata, {})
+
+    def test_mesh_execution_service_publishes_result_package_bundle(self):
+        beta = self.make_stack("beta-exec-package")
+
+        package = beta.mesh.execution.publish_job_result_package(
+            {
+                "id": "job-exec-package",
+                "request_id": "job-exec-package-req",
+                "kind": "agent.echo",
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "artifact_inputs": [],
+                "spec": {"dispatch_mode": "queued"},
+            },
+            result={"status": "ok", "stdout": "hello package\n"},
+            media_type="application/json",
+            executor="agent-runtime",
+            attempt_id="attempt-exec-package",
+            metadata={"secret_delivery": []},
+        )
+
+        self.assertTrue(package["result_ref"]["id"])
+        self.assertTrue(package["bundle_ref"]["id"])
+        self.assertTrue(package["config_ref"]["id"])
+        self.assertTrue(package["attestation_ref"]["id"])
+        bundle = beta.mesh.get_artifact(package["bundle_ref"]["id"], include_content=False)
+        self.assertEqual(bundle["artifact_kind"], "bundle")
+
+    def test_mesh_execution_service_submits_local_job_through_execution_boundary(self):
+        beta = self.make_stack("beta-exec-submit")
+
+        submitted = beta.mesh.execution.submit_local_job(
+            {
+                "kind": "agent.echo",
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "payload": {"message": "hello execution submit"},
+                "artifact_inputs": [],
+            },
+            request_id="execution-service-submit",
+        )
+
+        self.assertEqual(submitted["status"], "completed")
+        self.assertEqual(submitted["job"]["status"], "completed")
+        artifact = beta.mesh.get_artifact(submitted["job"]["result_ref"]["id"])
+        payload = json.loads(base64.b64decode(artifact["content_base64"]).decode("utf-8"))
+        self.assertEqual(payload["echo"]["message"], "hello execution submit")
+        self.assertTrue(submitted["job"]["result_bundle_ref"]["id"])
+
     def test_stream_snapshot_converges_on_peer_presence_after_mutual_handshake(self):
         alpha = self.make_stack("alpha")
         beta = self.make_stack("beta")
@@ -1090,6 +1172,53 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertTrue(beta_stream["agent_presence"])
         self.assertIn("beta-node", {peer["peer_id"] for peer in alpha_stream["peers"]})
         self.assertIn("alpha-node", {peer["peer_id"] for peer in beta_stream["peers"]})
+
+    def test_mesh_exposes_state_service_for_events_and_secrets(self):
+        alpha = self.make_stack("alpha-state")
+        beta = self.make_stack("beta-state")
+        _, beta_base_url = self.serve_mesh(beta)
+
+        alpha.mesh.seek_peers(base_urls=[beta_base_url], auto_connect=True, trust_tier="trusted")
+
+        event = alpha.mesh.state.record_event(
+            "mesh.state.test",
+            peer_id=alpha.mesh.node_id,
+            payload={"hello": "world"},
+        )
+        self.assertEqual(event["event_type"], "mesh.state.test")
+
+        stream = alpha.mesh.state.stream_snapshot(limit=10)
+        self.assertTrue(any(item["id"] == event["id"] for item in stream["events"]))
+
+        secret = alpha.mesh.state.put_secret(
+            "api-token",
+            "top-secret",
+            scope="mesh.ops",
+            metadata={"origin": "state-test"},
+        )
+        self.assertTrue(secret["value_present"])
+        self.assertNotIn("value", secret)
+
+        fetched = alpha.mesh.get_secret("api-token", scope="mesh.ops", include_value=True)
+        self.assertEqual(fetched["value"], "top-secret")
+        self.assertEqual(fetched["metadata"]["origin"], "state-test")
+
+        peers = alpha.mesh.state.list_peers(limit=10)
+        self.assertEqual(peers["peers"][0]["peer_id"], "beta-state-node")
+
+        candidates = alpha.mesh.state.list_discovery_candidates(limit=10)
+        self.assertEqual(candidates["count"], 1)
+        self.assertEqual(candidates["candidates"][0]["peer_id"], "beta-state-node")
+
+        alpha.mesh.register_worker(
+            worker_id="alpha-state-worker",
+            agent_id=alpha.agent_id,
+            capabilities=["worker-runtime", "shell"],
+            resources={"cpu": 2},
+        )
+        workers = alpha.mesh.state.list_workers(limit=10)
+        self.assertEqual(workers["count"], 1)
+        self.assertEqual(workers["workers"][0]["id"], "alpha-state-worker")
 
     def test_seek_peers_discovers_and_auto_connects_reachable_peer(self):
         alpha = self.make_stack("alpha")
@@ -3521,6 +3650,30 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(acked["status"], "acked")
         self.assertEqual(acked["metadata"]["last_actor_peer_id"], "watch-node")
 
+    def test_mesh_exposes_governance_service_for_notifications_and_approvals(self):
+        alpha = self.make_stack("alpha-governance")
+
+        notification = alpha.mesh.governance.publish_notification(
+            notification_type="job.summary",
+            priority="high",
+            title="Governance seam",
+            body="Governance service can publish notifications directly.",
+            target_peer_id="watch-node",
+            target_device_classes=["light"],
+        )
+        self.assertEqual(notification["notification_type"], "job.summary")
+        self.assertTrue(notification["presentation"]["compact"])
+
+        approval = alpha.mesh.governance.create_approval_request(
+            title="Approve governance seam",
+            summary="Verify governance service approval storage.",
+            action_type="operator_action",
+            target_peer_id="watch-node",
+        )
+        self.assertEqual(approval["status"], "pending")
+        listed = alpha.mesh.list_approvals(limit=10, target_peer_id="watch-node")
+        self.assertEqual(listed["count"], 1)
+
     def test_remote_approval_request_and_resolution_over_http(self):
         alpha = self.make_stack("alpha")
         beta = self.make_stack(
@@ -4806,6 +4959,17 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertTrue(continuity["safe_devices"])
         self.assertEqual(continuity["available_actions"][0]["action"], "resume")
 
+    def test_mesh_exposes_mission_service_for_continuity_queries(self):
+        beta = self.make_stack("beta")
+        state = self._checkpointed_mission(beta, request_id="mission-service-summary")
+        mission = state["mission"]
+
+        continuity = beta.mesh.missions.get_mission_continuity(mission["id"])
+
+        self.assertEqual(continuity["mission_id"], mission["id"])
+        self.assertEqual(continuity["continuity_state"], "ready_to_continue")
+        self.assertEqual(continuity["recommended_action"], "resume")
+
     def test_mission_resume_latest_recovers_checkpointed_child_job(self):
         beta = self.make_stack("beta")
         state = self._checkpointed_mission(beta, request_id="mission-resume-latest")
@@ -5410,6 +5574,27 @@ class SovereignMeshTests(unittest.TestCase):
         listed = alpha.mesh.list_offload_preferences(workload_class="gpu_inference")
         self.assertEqual(listed["count"], 1)
         self.assertEqual(listed["preferences"][0]["metadata"]["note"], "always use this GPU box")
+
+    def test_mesh_exposes_helper_service_for_preferences_and_pressure(self):
+        alpha = self.make_stack("alpha-helper-service")
+        beta = self.make_stack("beta-helper-service")
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_peer(base_url=beta_base_url, trust_tier="trusted")
+        alpha.mesh.sync_peer("beta-helper-service-node", limit=20, refresh_manifest=True)
+
+        stored = alpha.mesh.helpers.set_offload_preference(
+            "beta-helper-service-node",
+            workload_class="gpu_inference",
+            preference="prefer",
+            source="service-test",
+        )
+
+        self.assertEqual(stored["preference"], "prefer")
+        listed = alpha.mesh.list_offload_preferences(workload_class="gpu_inference")
+        self.assertEqual(listed["preferences"][0]["source"], "service-test")
+        pressure = alpha.mesh.helpers.mesh_pressure()
+        self.assertEqual(pressure["peer_id"], alpha.mesh.node_id)
+        self.assertIn("pressure", pressure)
 
     def test_scheduler_requires_gpu_when_job_declares_gpu_required(self):
         alpha = self.make_stack("alpha-ctl")
