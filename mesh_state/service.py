@@ -159,6 +159,7 @@ class MeshStateService:
         habitat_roles = list(card.get("habitat_roles") or self.mesh._device_profile_habitat_roles(device_profile))
         continuity_capabilities = dict(card.get("continuity_capabilities") or self.mesh._continuity_capabilities(device_profile))
         treaty_capabilities = dict(card.get("treaty_capabilities") or {})
+        treaty_compatibility = dict(self.mesh._peer_treaty_compatibility(device_profile, card=card))
         governance_summary = dict(card.get("governance_summary") or {})
         return {
             "peer_id": row["peer_id"],
@@ -180,6 +181,7 @@ class MeshStateService:
             "habitat_roles": habitat_roles,
             "continuity_capabilities": continuity_capabilities,
             "treaty_capabilities": treaty_capabilities,
+            "treaty_compatibility": treaty_compatibility,
             "governance_summary": governance_summary,
             "metadata": metadata,
             "reliability": self.mesh._peer_reliability_summary(peer_stub),
@@ -240,6 +242,14 @@ class MeshStateService:
     def row_to_discovery_candidate(self, row) -> Optional[dict]:
         if row is None:
             return None
+        manifest = self._loads_json(row["manifest"], {})
+        card = dict(manifest.get("organism_card") or {})
+        device_profile = self._normalize_device_profile(
+            self._loads_json(row["device_profile"], {})
+            or manifest.get("device_profile")
+            or card.get("device_profile")
+            or {}
+        )
         return {
             "base_url": row["base_url"] or "",
             "peer_id": row["peer_id"] or "",
@@ -247,8 +257,13 @@ class MeshStateService:
             "endpoint_url": row["endpoint_url"] or "",
             "status": row["status"] or "discovered",
             "trust_tier": self._normalize_trust_tier(row["trust_tier"]),
-            "device_profile": self._normalize_device_profile(self._loads_json(row["device_profile"], {})),
-            "manifest": self._loads_json(row["manifest"], {}),
+            "device_profile": device_profile,
+            "manifest": manifest,
+            "habitat_roles": list(card.get("habitat_roles") or self.mesh._device_profile_habitat_roles(device_profile)),
+            "continuity_capabilities": dict(card.get("continuity_capabilities") or self.mesh._continuity_capabilities(device_profile)),
+            "treaty_capabilities": dict(card.get("treaty_capabilities") or self.mesh._treaty_capabilities(device_profile)),
+            "treaty_compatibility": dict(self.mesh._peer_treaty_compatibility(device_profile, card=card)),
+            "governance_summary": dict(card.get("governance_summary") or manifest.get("governance_summary") or {}),
             "metadata": self._loads_json(row["metadata"], {}),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],

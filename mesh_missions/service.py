@@ -340,10 +340,18 @@ class MeshMissionService:
         profile: dict,
         connected: bool,
         current: bool = False,
+        habitat_roles: Optional[list[str]] = None,
+        continuity_capabilities: Optional[dict] = None,
+        treaty_capabilities: Optional[dict] = None,
+        treaty_compatibility: Optional[dict] = None,
     ) -> dict:
         normalized_profile = self.mesh._normalize_device_profile(profile)
         sync_policy = self.mesh._device_profile_sync_policy(normalized_profile)
         device_class = str(normalized_profile.get("device_class") or "full").strip().lower() or "full"
+        habitat_roles = list(habitat_roles or self.mesh._device_profile_habitat_roles(normalized_profile))
+        continuity_capabilities = dict(continuity_capabilities or self.mesh._continuity_capabilities(normalized_profile))
+        treaty_capabilities = dict(treaty_capabilities or self.mesh._treaty_capabilities(normalized_profile))
+        treaty_compatibility = dict(treaty_compatibility or self.mesh._peer_treaty_compatibility(normalized_profile))
         stability = (
             "stable"
             if device_class in {"full", "relay"} and not sync_policy.get("intermittent")
@@ -356,15 +364,24 @@ class MeshMissionService:
             "device_class": device_class,
             "execution_tier": str(normalized_profile.get("execution_tier") or "").strip(),
             "form_factor": str(normalized_profile.get("form_factor") or "").strip(),
-            "habitat_roles": list(self.mesh._device_profile_habitat_roles(normalized_profile)),
-            "continuity_capabilities": dict(self.mesh._continuity_capabilities(normalized_profile)),
+            "habitat_roles": habitat_roles,
+            "continuity_capabilities": continuity_capabilities,
+            "treaty_capabilities": treaty_capabilities,
+            "treaty_compatibility": treaty_compatibility,
             "connected": bool(connected),
             "current": bool(current),
             "sleep_capable": bool(sync_policy.get("sleep_capable")),
             "relay_recommended": bool(sync_policy.get("relay_recommended")),
             "stability": stability,
             "summary": self._compact_text(
-                f"{display_name or peer_id or 'device'} is a {device_class} device with {stability} continuity posture.",
+                (
+                    f"{display_name or peer_id or 'device'} is a {device_class} device with {stability} continuity posture. "
+                    + (
+                        "Treaty-aware custody review is available."
+                        if treaty_compatibility.get("remote_custody_review")
+                        else "Treaty-aware continuity is advisory on this device."
+                    )
+                ),
                 limit=120,
             ),
         }
@@ -383,6 +400,10 @@ class MeshMissionService:
             profile=self.mesh.device_profile,
             connected=True,
             current=self.mesh.node_id in current_targets,
+            habitat_roles=self.mesh._device_profile_habitat_roles(self.mesh.device_profile),
+            continuity_capabilities=self.mesh._continuity_capabilities(self.mesh.device_profile),
+            treaty_capabilities=self.mesh._treaty_capabilities(self.mesh.device_profile),
+            treaty_compatibility=self.mesh._peer_treaty_compatibility(self.mesh.device_profile),
         )
         if not preferred or local_entry["device_class"] in set(preferred):
             devices.append(local_entry)
@@ -398,6 +419,10 @@ class MeshMissionService:
                 profile=profile,
                 connected=str(peer.get("status") or "").strip().lower() == "connected",
                 current=str(peer.get("peer_id") or "").strip() in current_targets,
+                habitat_roles=list(peer.get("habitat_roles") or []),
+                continuity_capabilities=dict(peer.get("continuity_capabilities") or {}),
+                treaty_capabilities=dict(peer.get("treaty_capabilities") or {}),
+                treaty_compatibility=dict(peer.get("treaty_compatibility") or {}),
             )
             if preferred and entry["device_class"] not in set(preferred):
                 continue
@@ -515,19 +540,34 @@ class MeshMissionService:
             headline = "Mission is preparing to run."
         safe_devices = self.mission_safe_devices(mission, preferred_device_classes=preferred_device_classes)
         current_devices = [item for item in safe_devices if item.get("current")]
-        recommended_device = next(
-            (
-                item
-                for item in safe_devices
-                if item.get("peer_id") not in {device.get("peer_id") for device in current_devices}
-            ),
-            (safe_devices[0] if safe_devices else {}),
-        )
+        current_peer_ids = {device.get("peer_id") for device in current_devices}
         checkpoint_state = self.continuity_artifact_state(dict(mission.get("latest_checkpoint_ref") or {}), label="Latest Checkpoint")
         result_bundle_state = self.continuity_artifact_state(dict(mission.get("result_bundle_ref") or {}), label="Result Bundle")
         treaty_audit = self.mesh.audit_treaty_requirements(
             continuity.get("treaty_requirements") or [],
             operation="mission_continuity",
+        )
+        requires_treaties = bool(dict(treaty_audit.get("validation") or {}).get("required"))
+        recommended_treaty_device = next(
+            (
+                item
+                for item in safe_devices
+                if item.get("peer_id") not in current_peer_ids
+                and dict(item.get("treaty_compatibility") or {}).get("shared_treaty_validation")
+                and (
+                    not requires_treaties
+                    or dict(item.get("treaty_compatibility") or {}).get("remote_custody_review")
+                )
+            ),
+            {},
+        )
+        recommended_device = recommended_treaty_device or next(
+            (
+                item
+                for item in safe_devices
+                if item.get("peer_id") not in current_peer_ids
+            ),
+            (safe_devices[0] if safe_devices else {}),
         )
         return {
             "mission_id": mission["id"],
@@ -550,6 +590,7 @@ class MeshMissionService:
             }.get(recommended_action, "Continue Mission"),
             "current_devices": current_devices,
             "recommended_device": recommended_device or {},
+            "recommended_treaty_device": recommended_treaty_device,
             "safe_devices": safe_devices,
             "preferred_target_device_classes": preferred_device_classes,
             "recovery": {
@@ -902,6 +943,17 @@ class MeshMissionService:
         requested_target = str(target_peer_id or "").strip()
         if requested_target:
             selected_target = next((item for item in safe_devices if str(item.get("peer_id") or "").strip() == requested_target), {})
+        treaty_validation = dict(verification.get("treaty_validation") or {})
+        treaty_required = bool(treaty_validation.get("required"))
+        if not selected_target and treaty_required:
+            selected_target = next(
+                (
+                    item for item in safe_devices
+                    if bool(dict(item.get("treaty_compatibility") or {}).get("shared_treaty_validation"))
+                    and bool(dict(item.get("treaty_compatibility") or {}).get("remote_custody_review"))
+                ),
+                {},
+            )
         if not selected_target and safe_devices:
             selected_target = next((item for item in safe_devices if item.get("connected")), safe_devices[0])
 
@@ -909,7 +961,6 @@ class MeshMissionService:
         checkpoint_state = dict(artifact_availability.get("checkpoint_ref") or {})
         result_bundle_state = dict(artifact_availability.get("result_bundle_ref") or {})
         result_state = dict(artifact_availability.get("result_ref") or {})
-        treaty_validation = dict(verification.get("treaty_validation") or {})
         recommended_action = str(continuity.get("recommended_action") or "wait").strip().lower() or "wait"
         if recommended_action == "resume" and not bool(checkpoint_state.get("available")):
             recommended_action = "restart" if not bool(result_bundle_state.get("available") or result_state.get("available")) else "review"

@@ -2595,11 +2595,7 @@ class SovereignMesh:
         )
         habitat_roles = self._device_profile_habitat_roles(self.device_profile)
         continuity_capabilities = self._continuity_capabilities(self.device_profile)
-        treaty_capabilities = {
-            "treaty_documents": True,
-            "continuity_validation": True,
-            "custody_review": bool(continuity_capabilities.get("custody_review")),
-        }
+        treaty_capabilities = self._treaty_capabilities(self.device_profile)
         governance_summary = self.governance.treaty_posture(limit=5)
         card = OrganismCard(
             organism_id=self.node_id,
@@ -2750,16 +2746,24 @@ class SovereignMesh:
                 "last_request_id": request_meta.get("request_id"),
             },
         )
+        peer_advisory = self._peer_protocol_advisory(peer=row, source="handshake.accepted")
         self._record_event(
             "mesh.handshake.accepted",
             peer_id=peer_id,
             request_id=request_meta.get("request_id") or "",
-            payload={"display_name": peer_card.get("display_name") or peer_id, "mesh_session_id": mesh_session_id},
+            payload={
+                "display_name": peer_card.get("display_name") or peer_id,
+                "mesh_session_id": mesh_session_id,
+                "peer_advisory": peer_advisory,
+            },
         )
         return {
             "status": "ok",
             "mesh_session_id": mesh_session_id,
             "peer": row,
+            "peer_advisory": peer_advisory,
+            "operator_summary": peer_advisory.get("operator_summary") or "",
+            "recommended_action": peer_advisory.get("recommended_action") or "",
             "manifest": self.get_manifest(),
             "stream": self.stream_snapshot(limit=25),
             "accepted_at": _utcnow(),
@@ -2808,7 +2812,7 @@ class SovereignMesh:
             },
         )
         response = client.handshake(envelope)
-        self.remember_peer_card(
+        remembered_peer = self.remember_peer_card(
             {**remote_card, "endpoint_url": remote_endpoint_url, "stream_url": f"{remote_endpoint_url}/mesh/stream"},
             trust_tier=trust_tier,
             mesh_session_id=response.get("mesh_session_id") or "",
@@ -2826,13 +2830,29 @@ class SovereignMesh:
                 "last_remote_handshake": response.get("accepted_at"),
             },
         )
+        peer_advisory = self._peer_protocol_advisory(peer=remembered_peer, source="handshake.sent")
+        accepted_peer_advisory = dict(response.get("peer_advisory") or {})
         self._record_event(
             "mesh.handshake.sent",
             peer_id=remote_card.get("organism_id") or remote_card.get("node_id") or "",
             request_id=envelope["request"]["request_id"],
-            payload={"base_url": normalized_base_url, "trust_tier": _normalize_trust_tier(trust_tier)},
+            payload={
+                "base_url": normalized_base_url,
+                "trust_tier": _normalize_trust_tier(trust_tier),
+                "peer_advisory": peer_advisory,
+                "accepted_peer_advisory": accepted_peer_advisory,
+            },
         )
-        return {"status": "ok", "remote_manifest": remote_manifest, "response": response}
+        return {
+            "status": "ok",
+            "peer": remembered_peer,
+            "peer_advisory": peer_advisory,
+            "operator_summary": peer_advisory.get("operator_summary") or "",
+            "recommended_action": peer_advisory.get("recommended_action") or "",
+            "accepted_peer_advisory": accepted_peer_advisory,
+            "remote_manifest": remote_manifest,
+            "response": response,
+        }
 
     def _discovery_candidate_by_peer_id(self, peer_id: str) -> Optional[dict]:
         token = str(peer_id or "").strip()
@@ -2977,9 +2997,13 @@ class SovereignMesh:
         connected_peer_id = str(remote_card.get("organism_id") or remote_card.get("node_id") or peer_token).strip()
         sync_result = self.sync_peer(connected_peer_id, base_url=base_token, limit=20, refresh_manifest=refresh_manifest)
         resolved_peer = self._row_to_peer(self._get_peer_row(connected_peer_id)) or dict(sync_result.get("peer") or {})
+        peer_advisory = self._peer_protocol_advisory(peer=resolved_peer, source="connect.device")
         return {
             "status": "ok",
             "peer": resolved_peer,
+            "peer_advisory": peer_advisory,
+            "operator_summary": peer_advisory.get("operator_summary") or "",
+            "recommended_action": peer_advisory.get("recommended_action") or "",
             "peer_id": connected_peer_id,
             "base_url": base_token,
             "connection": connection,
@@ -3019,14 +3043,15 @@ class SovereignMesh:
             seen_keys.add(key)
             if peer_id == self.node_id:
                 continue
-            results.append(
-                {
-                    "status": "already_connected",
-                    "peer_id": peer_id,
-                    "base_url": endpoint_url,
-                    "peer": dict(peer),
-                }
-            )
+                results.append(
+                    {
+                        "status": "already_connected",
+                        "peer_id": peer_id,
+                        "base_url": endpoint_url,
+                        "peer": dict(peer),
+                        "peer_advisory": self._peer_protocol_advisory(peer=peer, source="connect.all"),
+                    }
+                )
 
         for candidate in candidate_rows:
             peer_id = str(candidate.get("peer_id") or "").strip()
@@ -3053,6 +3078,7 @@ class SovereignMesh:
                         "peer_id": str(connected.get("peer_id") or peer_id).strip(),
                         "base_url": endpoint_url,
                         "peer": dict(connected.get("peer") or {}),
+                        "peer_advisory": dict(connected.get("peer_advisory") or {}),
                     }
                 )
             except Exception as exc:
@@ -3068,6 +3094,11 @@ class SovereignMesh:
         connected_count = sum(1 for item in results if item.get("status") == "connected")
         ready_count = sum(1 for item in results if item.get("status") == "already_connected")
         error_count = sum(1 for item in results if item.get("status") == "error")
+        treaty_ready_count = sum(
+            1
+            for item in results
+            if (((item.get("peer_advisory") or {}).get("treaty_compatibility") or {}).get("advisory_state") == "full")
+        )
         mesh_peer_snapshot = self.list_peers(limit=max(limit * 2, 24))
         mesh_peer_ids = [
             str(peer.get("peer_id") or "").strip()
@@ -3082,6 +3113,11 @@ class SovereignMesh:
             "already_connected": ready_count,
             "errors": error_count,
             "count": len(results),
+            "operator_summary": (
+                f"Mesh connect checked {len(results)} peer(s): {connected_count} new, "
+                f"{ready_count} already ready, {treaty_ready_count} treaty/custody-ready."
+            ),
+            "treaty_ready": treaty_ready_count,
             "mesh": {
                 "peer_count": int(mesh_peer_snapshot.get("count") or len(mesh_peer_ids)),
                 "peer_ids": mesh_peer_ids,
@@ -3396,19 +3432,27 @@ class SovereignMesh:
             },
             status="connected",
         )
+        peer_advisory = self._peer_protocol_advisory(peer=updated_peer, source="peer.synced")
         self._record_event(
             "mesh.peer.synced",
             peer_id=peer_id,
-            payload={"imported_events": imported, "next_cursor": next_cursor},
+            payload={
+                "imported_events": imported,
+                "next_cursor": next_cursor,
+                "peer_advisory": peer_advisory,
+            },
         )
         self._record_event(
             "mesh.peer.heartbeat",
             peer_id=peer_id,
-            payload=heartbeat,
+            payload={**heartbeat, "peer_advisory": peer_advisory},
         )
         return {
             "status": "ok",
             "peer": updated_peer,
+            "peer_advisory": peer_advisory,
+            "operator_summary": peer_advisory.get("operator_summary") or "",
+            "recommended_action": peer_advisory.get("recommended_action") or "",
             "imported_events": imported,
             "next_cursor": next_cursor,
             "heartbeat": heartbeat,
@@ -7009,6 +7053,157 @@ class SovereignMesh:
             "long_sleep": bool(sync_policy.get("sleep_capable") or sync_policy.get("intermittent")),
             "custody_review": bool(normalized.get("approval_capable") and normalized.get("secure_secret_capable")),
             "habitat_roles": habitat_roles,
+        }
+
+    def _treaty_capabilities(self, profile: dict) -> dict:
+        continuity_capabilities = self._continuity_capabilities(profile)
+        return {
+            "treaty_documents": True,
+            "continuity_validation": True,
+            "custody_review": bool(continuity_capabilities.get("custody_review")),
+        }
+
+    def _peer_treaty_compatibility(
+        self,
+        profile: dict,
+        *,
+        card: Optional[dict] = None,
+    ) -> dict:
+        remote_card = dict(card or {})
+        remote_continuity = dict(
+            remote_card.get("continuity_capabilities")
+            or self._continuity_capabilities(profile)
+        )
+        remote_treaty = dict(
+            remote_card.get("treaty_capabilities")
+            or self._treaty_capabilities(profile)
+        )
+        shared_validation = bool(
+            remote_treaty.get("treaty_documents")
+            and remote_treaty.get("continuity_validation")
+        )
+        remote_custody = bool(
+            remote_treaty.get("custody_review")
+            or remote_continuity.get("custody_review")
+        )
+        local_custody = bool(self._treaty_capabilities(self.device_profile).get("custody_review"))
+        reasons: list[str] = []
+        if shared_validation:
+            reasons.append("shared_treaty_validation")
+        else:
+            reasons.append("remote_treaty_validation_unavailable")
+        if remote_custody:
+            reasons.append("remote_custody_review")
+        if local_custody and remote_custody:
+            reasons.append("custody_pairing_ready")
+        advisory_state = (
+            "full"
+            if shared_validation and remote_custody
+            else ("advisory" if shared_validation else "limited")
+        )
+        summary = {
+            "full": "Peer can participate in treaty-aware continuity and custody review.",
+            "advisory": "Peer can exchange treaty-aware continuity signals, but custody review is limited.",
+            "limited": "Peer sync is compatible, but treaty-aware continuity remains advisory only.",
+        }[advisory_state]
+        return {
+            "advisory_state": advisory_state,
+            "shared_treaty_validation": shared_validation,
+            "remote_custody_review": remote_custody,
+            "custody_pairing_ready": bool(local_custody and remote_custody),
+            "reasons": reasons,
+            "summary": summary,
+        }
+
+    def _peer_protocol_advisory(
+        self,
+        *,
+        peer: Optional[dict] = None,
+        peer_id: str = "",
+        display_name: str = "",
+        profile: Optional[dict] = None,
+        card: Optional[dict] = None,
+        governance_summary: Optional[dict] = None,
+        source: str = "",
+    ) -> dict:
+        peer_row = dict(peer or {})
+        peer_card = dict(card or peer_row.get("card") or {})
+        device_profile = _normalize_device_profile(
+            profile
+            or peer_row.get("device_profile")
+            or peer_card.get("device_profile")
+            or {}
+        )
+        habitat_roles = list(
+            peer_row.get("habitat_roles")
+            or peer_card.get("habitat_roles")
+            or self._device_profile_habitat_roles(device_profile)
+        )
+        continuity_capabilities = dict(
+            peer_row.get("continuity_capabilities")
+            or peer_card.get("continuity_capabilities")
+            or self._continuity_capabilities(device_profile)
+        )
+        treaty_capabilities = dict(
+            peer_row.get("treaty_capabilities")
+            or peer_card.get("treaty_capabilities")
+            or self._treaty_capabilities(device_profile)
+        )
+        normalized_card = {
+            **peer_card,
+            "continuity_capabilities": continuity_capabilities,
+            "treaty_capabilities": treaty_capabilities,
+        }
+        treaty_compatibility = dict(
+            peer_row.get("treaty_compatibility")
+            or self._peer_treaty_compatibility(device_profile, card=normalized_card)
+        )
+        governance = dict(
+            governance_summary
+            or peer_row.get("governance_summary")
+            or peer_card.get("governance_summary")
+            or {}
+        )
+        resolved_peer_id = (
+            str(peer_row.get("peer_id") or "").strip()
+            or str(peer_card.get("organism_id") or peer_card.get("node_id") or "").strip()
+            or str(peer_id or "").strip()
+        )
+        resolved_display_name = (
+            str(peer_row.get("display_name") or "").strip()
+            or str(peer_card.get("display_name") or "").strip()
+            or str(display_name or "").strip()
+            or resolved_peer_id
+        )
+        missing_capabilities: list[str] = []
+        if not treaty_compatibility.get("shared_treaty_validation"):
+            missing_capabilities.append("treaty_validation")
+        if not treaty_compatibility.get("remote_custody_review"):
+            missing_capabilities.append("remote_custody_review")
+        if treaty_compatibility.get("remote_custody_review") and not treaty_compatibility.get("custody_pairing_ready"):
+            missing_capabilities.append("local_custody_review")
+        advisory_state = str(treaty_compatibility.get("advisory_state") or "limited").strip().lower()
+        recommended_actions = {
+            "full": "Use this peer for treaty-aware continuity and custody review.",
+            "advisory": "Use this peer for treaty-aware visibility, but choose a custody-capable peer for protected restores.",
+            "limited": "Keep this peer on normal sync until it advertises treaty validation.",
+        }
+        operator_summary = (
+            f"{resolved_display_name or resolved_peer_id or 'Peer'} treaty posture is {advisory_state}. "
+            f"{treaty_compatibility.get('summary') or 'Treaty-aware continuity remains advisory.'}"
+        )
+        return {
+            "peer_id": resolved_peer_id,
+            "display_name": resolved_display_name,
+            "source": str(source or "").strip(),
+            "habitat_roles": habitat_roles,
+            "continuity_capabilities": continuity_capabilities,
+            "treaty_capabilities": treaty_capabilities,
+            "treaty_compatibility": treaty_compatibility,
+            "governance_summary": governance,
+            "missing_capabilities": missing_capabilities,
+            "recommended_action": recommended_actions.get(advisory_state, recommended_actions["limited"]),
+            "operator_summary": operator_summary,
         }
 
     def _job_sync_resilience(

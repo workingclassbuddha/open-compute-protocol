@@ -138,6 +138,62 @@ def build_control_state(mesh: SovereignMesh) -> dict[str, Any]:
     }
 
 
+def _control_peer_advisories(state: dict[str, Any]) -> dict[str, Any]:
+    peers = list(((state.get("peers") or {}).get("peers") or []))
+    candidates = list(((state.get("discovery_candidates") or {}).get("candidates") or []))
+
+    def project(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        projected = []
+        for item in items:
+            treaty = dict(item.get("treaty_compatibility") or {})
+            advisory_state = str(treaty.get("advisory_state") or "limited").strip().lower()
+            recommended_action = {
+                "full": "Use this peer for treaty-aware continuity and custody review.",
+                "advisory": "Use this peer for treaty-aware visibility, but choose a custody-capable peer for protected restores.",
+                "limited": "Keep this peer on normal sync until it advertises treaty validation.",
+            }.get(advisory_state, "Keep this peer on normal sync until it advertises treaty validation.")
+            missing_capabilities = []
+            if not treaty.get("shared_treaty_validation"):
+                missing_capabilities.append("treaty_validation")
+            if not treaty.get("remote_custody_review"):
+                missing_capabilities.append("remote_custody_review")
+            if treaty.get("remote_custody_review") and not treaty.get("custody_pairing_ready"):
+                missing_capabilities.append("local_custody_review")
+            display_name = item.get("display_name") or item.get("peer_id") or ""
+            operator_summary = (
+                f"{display_name or 'Peer'} treaty posture is {advisory_state}. "
+                f"{treaty.get('summary') or 'Treaty-aware continuity remains advisory.'}"
+            )
+            projected.append(
+                {
+                    "peer_id": str(item.get("peer_id") or "").strip(),
+                    "display_name": display_name,
+                    "advisory_state": advisory_state,
+                    "summary": treaty.get("summary") or "",
+                    "operator_summary": item.get("operator_summary") or operator_summary,
+                    "recommended_action": item.get("recommended_action") or recommended_action,
+                    "missing_capabilities": list(item.get("missing_capabilities") or missing_capabilities),
+                    "shared_treaty_validation": bool(treaty.get("shared_treaty_validation")),
+                    "remote_custody_review": bool(treaty.get("remote_custody_review")),
+                    "custody_pairing_ready": bool(treaty.get("custody_pairing_ready")),
+                }
+            )
+        return projected
+
+    connected = project(peers)
+    discovered = project(candidates)
+    return {
+        "connected": connected,
+        "discovered": discovered,
+        "counts": {
+            "connected": len(connected),
+            "discovered": len(discovered),
+            "connected_full": sum(1 for item in connected if item["advisory_state"] == "full"),
+            "discovered_full": sum(1 for item in discovered if item["advisory_state"] == "full"),
+        },
+    }
+
+
 def build_control_stream_payload(
     mesh: SovereignMesh,
     *,
@@ -157,6 +213,7 @@ def build_control_stream_payload(
         "type": "control_state",
         "cursor": cursor,
         "events": list(snapshot.get("events") or []),
+        "peer_advisories": _control_peer_advisories(state),
         "state": state,
         "generated_at": snapshot.get("generated_at") or "",
     }
@@ -2655,6 +2712,42 @@ def build_control_page(mesh: SovereignMesh) -> str:
       }
     }
 
+    function treatyAdvisorySummary(advisory) {
+      const payload = advisory || {};
+      const compatibility = payload.treaty_compatibility || payload;
+      if (payload.operator_summary) {
+        return payload.operator_summary;
+      }
+      const state = String(compatibility.advisory_state || "limited").toLowerCase();
+      const summary = compatibility.summary || "Treaty-aware continuity remains advisory.";
+      return "Treaty posture is " + state + ". " + summary;
+    }
+
+    function treatyAdvisoryAction(advisory) {
+      const payload = advisory || {};
+      if (payload.recommended_action) {
+        return payload.recommended_action;
+      }
+      const compatibility = payload.treaty_compatibility || payload;
+      const state = String(compatibility.advisory_state || "limited").toLowerCase();
+      if (state === "full") {
+        return "Use this peer for treaty-aware continuity and custody review.";
+      }
+      if (state === "advisory") {
+        return "Use this peer for treaty-aware visibility, but choose a custody-capable peer for protected restores.";
+      }
+      return "Keep this peer on normal sync until it advertises treaty validation.";
+    }
+
+    function eventOperatorSummary(event) {
+      const payload = (event && event.payload) || {};
+      const advisory = payload.peer_advisory || payload.accepted_peer_advisory || null;
+      if (advisory) {
+        return treatyAdvisorySummary(advisory);
+      }
+      return String((event && event.event_type) || "control update");
+    }
+
     function showError(section, message) {
       document.querySelectorAll('[data-error-for="' + section + '"]').forEach(function (node) {
         node.textContent = message;
@@ -3295,6 +3388,33 @@ def build_control_page(mesh: SovereignMesh) -> str:
       const peers = (state.peers && state.peers.peers) || [];
       peers.forEach(function (peer) {
         const status = String(peer.status || "").toLowerCase();
+        const treaty = peer.treaty_compatibility || {};
+        const treatyState = String(treaty.advisory_state || "").toLowerCase();
+        if (treatyState) {
+          items.push({
+            key: "treaty-peer:" + String(peer.peer_id || ""),
+            surface: "Treaty",
+            level: treatyState === "full" ? "safe" : (treatyState === "advisory" ? "cyan" : "warn"),
+            title: peer.display_name || peer.peer_id || "Peer treaty posture",
+            detail: treatyAdvisorySummary(peer),
+            meta: [
+              capitalize(treatyState),
+              treaty.remote_custody_review ? "custody review" : "validation only",
+              treaty.custody_pairing_ready ? "pairing ready" : "",
+              treaty.shared_treaty_validation ? "treaty validation" : "normal sync"
+            ].filter(Boolean),
+            href: "/mesh/peers",
+            updated_at: recordTimestamp(peer),
+            time_ms: recordTimeMs(peer),
+            signature: JSON.stringify([
+              treaty.advisory_state,
+              treaty.shared_treaty_validation,
+              treaty.remote_custody_review,
+              treaty.custody_pairing_ready,
+              peer.updated_at
+            ])
+          });
+        }
         if (!["degraded", "disconnected", "offline"].includes(status)) {
           return;
         }
@@ -3329,6 +3449,8 @@ def build_control_page(mesh: SovereignMesh) -> str:
 
     function renderPulse(state) {
       const pressure = state.pressure || {};
+      const manifest = state.manifest || {};
+      const governanceSummary = manifest.governance_summary || {};
       const peers = (state.peers && state.peers.peers) || [];
       const missions = (state.missions && state.missions.missions) || [];
       const notifications = (state.notifications && state.notifications.notifications) || [];
@@ -3418,6 +3540,14 @@ def build_control_page(mesh: SovereignMesh) -> str:
           value: connectedPeers,
           detail: String(activeWorkers) + " workers visible with mesh quality " + meshQuality(state.peers) + ".",
           level: connectedPeers > 0 ? "safe" : "danger"
+        },
+        {
+          label: "Treaty Posture",
+          value: Number(governanceSummary.count || 0),
+          detail: Number(governanceSummary.count || 0) > 0
+            ? String((governanceSummary.active_treaty_ids || []).length) + " active treaty marker(s) advertised in this habitat."
+            : "No local treaties have been proposed yet.",
+          level: Number(governanceSummary.count || 0) > 0 ? "cyan" : "violet"
         }
       ];
       document.getElementById("pulse-summary-grid").innerHTML = summaryCards.map(function (card) {
@@ -3592,12 +3722,16 @@ def build_control_page(mesh: SovereignMesh) -> str:
     function renderMissionInspect(payload) {
       const mission = payload.mission || {};
       const continuity = mission.continuity || {};
+      const governance = payload.governance || {};
+      const treatyAudit = governance.treaty_audit || {};
+      const treatyValidation = payload.treaty_validation || treatyAudit.validation || {};
       const lineage = mission.lineage || {};
       const childJobs = mission.child_jobs || [];
       const jobs = lineage.jobs || [];
       const tasks = lineage.cooperative_tasks || [];
       const currentDevices = payload.current_devices || [];
       const safeDevices = payload.safe_devices || [];
+      const recommendedTreatyDevice = payload.recommended_treaty_device || {};
       const checkpointArtifact = ((payload.artifacts || {}).checkpoint || {}).artifact || {};
       const resultBundle = ((payload.artifacts || {}).result_bundle || {}).artifact || {};
       const actionButtons = (payload.available_actions || []).map(function (action) {
@@ -3635,8 +3769,20 @@ def build_control_page(mesh: SovereignMesh) -> str:
             { label: "Current State", value: String(payload.continuity_state || mission.status || "planned").replace(/_/g, " ") },
             { label: "Resumable", value: continuity.resumable ? "yes" : "no" },
             { label: "Checkpoint Ready", value: continuity.checkpoint_ready ? "yes" : "no" },
-            { label: "Preferred Recovery Devices", value: (payload.preferred_target_device_classes || []).join(", ") }
+            { label: "Preferred Recovery Devices", value: (payload.preferred_target_device_classes || []).join(", ") },
+            { label: "Best Treaty Device", value: recommendedTreatyDevice.display_name || recommendedTreatyDevice.peer_id || "" }
           ]) +
+        '</section>',
+        '<section class="ocp-inspect-section">' +
+          '<h3 class="ocp-inspect-section__title">Treaty Posture</h3>' +
+          renderInspectStats([
+            { label: "Audit Status", value: String(treatyAudit.status || (treatyValidation.satisfied ? "ok" : "attention_needed")).replace(/_/g, " ") },
+            { label: "Treaty Requirements", value: String((governance.treaty_requirements || []).length || 0) },
+            { label: "Matched", value: String((treatyValidation.matched || []).length || 0) },
+            { label: "Missing", value: String((treatyValidation.missing || []).length || 0) },
+            { label: "Inactive", value: String((treatyValidation.inactive || []).length || 0) }
+          ]) +
+          '<div class="ocp-inspect-copy" style="margin-top:12px;">' + escapeHtml(treatyAudit.guidance || "No treaty guidance is attached to this mission continuity state.") + '</div>' +
         '</section>',
         renderInspectList("Current Devices", currentDevices.map(function (device) {
           return '<div class="ocp-inspect-item">' +
@@ -3647,6 +3793,7 @@ def build_control_page(mesh: SovereignMesh) -> str:
             '<div class="ocp-inspect-item__meta">' +
               '<span>' + escapeHtml(device.trust_tier || "trusted") + '</span>' +
               '<span>' + escapeHtml(device.stability || "stable") + '</span>' +
+              '<span>' + escapeHtml((((device.treaty_compatibility || {}).advisory_state) || "compatible").replace(/_/g, " ")) + '</span>' +
             '</div>' +
           '</div>';
         })),
@@ -3655,6 +3802,11 @@ def build_control_page(mesh: SovereignMesh) -> str:
             '<div class="ocp-inspect-item__head">' +
               '<span class="ocp-inspect-item__title">' + escapeHtml(device.display_name || device.peer_id || "device") + '</span>' +
               '<span class="ocp-pill ' + inspectStatusTone(device.connected ? "connected" : "offline") + '">' + escapeHtml(String(device.device_class || "device").toUpperCase()) + '</span>' +
+            '</div>' +
+            '<div class="ocp-inspect-item__meta">' +
+              '<span>' + escapeHtml((device.habitat_roles || []).join(", ") || "no habitat roles") + '</span>' +
+              '<span>' + escapeHtml((device.treaty_compatibility || {}).advisory_state || "compatible") + '</span>' +
+              '<span>' + escapeHtml((device.treaty_capabilities || {}).custody_review ? "custody review" : "validation only") + '</span>' +
             '</div>' +
             '<div class="ocp-inspect-copy">' + escapeHtml(device.summary || "") + '</div>' +
           '</div>';
@@ -3940,6 +4092,7 @@ def build_control_page(mesh: SovereignMesh) -> str:
       target.innerHTML = missions.map(function (mission) {
         const summary = mission.summary || {};
         const continuity = mission.continuity || {};
+        const treatyRequirements = continuity.treaty_requirements || [];
         const launch = (mission.metadata || {}).launch || {};
         const lineage = mission.lineage || {};
         const lineageJobs = lineage.jobs || [];
@@ -3991,6 +4144,7 @@ def build_control_page(mesh: SovereignMesh) -> str:
               '<span>' + escapeHtml(String(mission.target_strategy || "local").replace(/_/g, " ")) + '</span>' +
               '<span>' + escapeHtml(checkpointReady) + '</span>' +
               '<span>' + escapeHtml(resultReady) + '</span>' +
+              (treatyRequirements.length ? '<span>' + escapeHtml(String(treatyRequirements.length) + " treaty req") + '</span>' : '') +
             '</div>' +
             '<div class="ocp-toolbar">' + actionButtons.join("") +
               renderInspectActionButton("Inspect Mission", "mission", mission.id || "", "/mesh/missions/" + encodeURIComponent(mission.id || "")) +
@@ -4341,8 +4495,15 @@ def build_control_page(mesh: SovereignMesh) -> str:
       }
       target.innerHTML = peers.map(function (peer) {
         const profile = peer.device_profile || {};
+        const compatibility = peer.treaty_compatibility || {};
         const dotClass = peer.status === "connected" ? "ocp-status-dot ocp-status-dot--live" : (peer.status === "degraded" ? "ocp-status-dot ocp-status-dot--busy" : "ocp-status-dot ocp-status-dot--offline");
         const tags = [profile.device_class, profile.execution_tier, profile.form_factor].filter(Boolean).slice(0, 3);
+        if (peer.treaty_capabilities && peer.treaty_capabilities.continuity_validation) {
+          tags.push("treaty");
+        }
+        if (compatibility.remote_custody_review) {
+          tags.push("custody");
+        }
         return '<article class="ocp-peer-card">' +
           '<div class="ocp-peer-card__top">' +
             '<div>' +
@@ -4354,10 +4515,12 @@ def build_control_page(mesh: SovereignMesh) -> str:
           '<div class="ocp-peer-card__meta">' +
             '<span>' + escapeHtml("last seen " + relativeTime(peer.last_seen_at || peer.updated_at)) + '</span>' +
             '<span>' + escapeHtml(String(peer.status || "unknown")) + '</span>' +
+            '<span>' + escapeHtml(String(compatibility.advisory_state || "compatible").replace(/_/g, " ")) + '</span>' +
           '</div>' +
           '<div class="ocp-peer-tags">' + tags.map(function (tag) {
             return '<span class="ocp-mini-tag">' + escapeHtml(String(tag).toUpperCase()) + '</span>';
           }).join("") + '</div>' +
+          '<div class="ocp-autonomy-copy" style="margin-top:10px;">' + escapeHtml(compatibility.summary || "Peer treaty compatibility is available.") + '</div>' +
         '</article>';
       }).join("");
       clearError("peers");
@@ -4784,7 +4947,7 @@ def build_control_page(mesh: SovereignMesh) -> str:
       }
       if (Array.isArray(envelope.events) && envelope.events.length) {
         const latestEvent = envelope.events[envelope.events.length - 1] || {};
-        setStatus("Live stream: " + String(envelope.events.length) + " mesh event(s) applied through " + String(latestEvent.event_type || "control update") + ".");
+        setStatus("Live stream: " + String(envelope.events.length) + " mesh event(s) applied. " + eventOperatorSummary(latestEvent));
       }
     }
 
@@ -5016,10 +5179,12 @@ def build_control_page(mesh: SovereignMesh) -> str:
             setStatus("Connecting everything nearby...");
             connectAllDevices().then(function (result) {
               setStatus(
-                "Mesh connect complete: " +
-                String(result.connected || 0) + " new, " +
-                String(result.already_connected || 0) + " already ready, " +
-                String(result.errors || 0) + " problem(s)."
+                result.operator_summary || (
+                  "Mesh connect complete: " +
+                  String(result.connected || 0) + " new, " +
+                  String(result.already_connected || 0) + " already ready, " +
+                  String(result.errors || 0) + " problem(s)."
+                )
               );
               return fetchState({ silent: true });
             }).catch(function (error) {
@@ -5068,7 +5233,7 @@ def build_control_page(mesh: SovereignMesh) -> str:
             setStatus("Connecting device...");
             connectPeerDevice({ base_url: baseUrl, peer_id: peerId }).then(function (result) {
               const peer = result.peer || {};
-              setStatus("Connected " + String(peer.display_name || peer.peer_id || baseUrl) + ".");
+              setStatus("Connected " + String(peer.display_name || peer.peer_id || baseUrl) + ". " + treatyAdvisoryAction(result.peer_advisory || peer));
               return fetchState({ silent: true });
             }).catch(function (error) {
               showError("connect", "Connect failed: " + error.message);
@@ -5832,6 +5997,22 @@ def build_easy_page(mesh: SovereignMesh) -> str:
       }
     }
 
+    function treatyAdvisoryAction(advisory) {
+      const payload = advisory || {};
+      if (payload.recommended_action) {
+        return payload.recommended_action;
+      }
+      const compatibility = payload.treaty_compatibility || payload;
+      const state = String(compatibility.advisory_state || "limited").toLowerCase();
+      if (state === "full") {
+        return "Use this peer for treaty-aware continuity and custody review.";
+      }
+      if (state === "advisory") {
+        return "Use this peer for treaty-aware visibility, but choose a custody-capable peer for protected restores.";
+      }
+      return "Keep this peer on normal sync until it advertises treaty validation.";
+    }
+
     async function fetchJson(url, options) {
       const response = await fetch(url, options);
       if (!response.ok) {
@@ -5960,16 +6141,18 @@ def build_easy_page(mesh: SovereignMesh) -> str:
 
       peers.forEach(function (peer) {
         const profile = peer.device_profile || {};
+        const compatibility = peer.treaty_compatibility || {};
         cards.push({
           key: "peer:" + String(peer.peer_id || ""),
           title: peer.display_name || peer.peer_id || "Connected computer",
           baseUrl: peer.endpoint_url || "",
           peerId: peer.peer_id || "",
           status: peer.status || "connected",
-          copy: "This computer is already part of your mesh. You can send a proof mission right now.",
+          copy: "This computer is already part of your mesh. " + String(compatibility.summary || "You can send a proof mission right now."),
           meta: [
             profile.device_class ? String(profile.device_class).toUpperCase() : "",
             profile.form_factor ? String(profile.form_factor).toUpperCase() : "",
+            compatibility.remote_custody_review ? "CUSTODY READY" : "VALIDATION READY",
             "last seen " + relativeTime(peer.last_seen_at || peer.updated_at)
           ].filter(Boolean),
           connected: true
@@ -5982,6 +6165,7 @@ def build_easy_page(mesh: SovereignMesh) -> str:
           return;
         }
         const profile = candidate.device_profile || {};
+        const compatibility = candidate.treaty_compatibility || {};
         cards.push({
           key: "candidate:" + String(candidate.base_url || candidate.endpoint_url || ""),
           title: candidate.display_name || candidate.peer_id || compactUrl(candidate.endpoint_url || candidate.base_url || "") || "Discovered computer",
@@ -5990,10 +6174,11 @@ def build_easy_page(mesh: SovereignMesh) -> str:
           status: candidate.status || "discovered",
           copy: candidate.last_error
             ? "Last problem: " + String(candidate.last_error)
-            : "Discovered and ready for one-click connect.",
+            : (compatibility.summary || "Discovered and ready for one-click connect."),
           meta: [
             profile.device_class ? String(profile.device_class).toUpperCase() : "",
             profile.form_factor ? String(profile.form_factor).toUpperCase() : "",
+            (candidate.treaty_capabilities || {}).continuity_validation ? "TREATY AWARE" : "",
             candidate.last_seen_at ? "seen " + relativeTime(candidate.last_seen_at) : ""
           ].filter(Boolean),
           connected: false
@@ -6094,7 +6279,7 @@ def build_easy_page(mesh: SovereignMesh) -> str:
         body: JSON.stringify(payload)
       });
       const peer = result.peer || {};
-      setStatus("Connected " + String(peer.display_name || peer.peer_id || "computer") + ".");
+      setStatus("Connected " + String(peer.display_name || peer.peer_id || "computer") + ". " + treatyAdvisoryAction(result.peer_advisory || peer));
       await refreshEasy({ silent: true });
     }
 
@@ -6105,10 +6290,12 @@ def build_easy_page(mesh: SovereignMesh) -> str:
         body: JSON.stringify(Object.assign({ trust_tier: "trusted", timeout: 3.0, scan_timeout: 0.8, limit: 24 }, payload || {}))
       });
       setStatus(
-        "Mesh connect complete: " +
-        String(result.connected || 0) + " new, " +
-        String(result.already_connected || 0) + " already ready, " +
-        String(result.errors || 0) + " problem(s)."
+        result.operator_summary || (
+          "Mesh connect complete: " +
+          String(result.connected || 0) + " new, " +
+          String(result.already_connected || 0) + " already ready, " +
+          String(result.errors || 0) + " problem(s)."
+        )
       );
       await refreshEasy({ silent: true });
     }

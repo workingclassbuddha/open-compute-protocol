@@ -3304,6 +3304,8 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertTrue(peer["continuity_capabilities"]["restore_dry_run"])
         self.assertTrue(peer["continuity_capabilities"]["long_sleep"])
         self.assertTrue(peer["treaty_capabilities"]["treaty_documents"])
+        self.assertEqual(peer["treaty_compatibility"]["advisory_state"], "full")
+        self.assertTrue(peer["treaty_compatibility"]["shared_treaty_validation"])
 
     def test_scheduler_prefers_local_worker_when_available(self):
         alpha = self.make_stack("alpha")
@@ -4524,12 +4526,27 @@ class SovereignMeshTests(unittest.TestCase):
         response = alpha.mesh.connect_peer(base_url=base_url, trust_tier="trusted")
 
         self.assertEqual(response["status"], "ok")
+        self.assertEqual(response["peer"]["peer_id"], "beta-node")
+        self.assertEqual(response["peer_advisory"]["peer_id"], "beta-node")
+        self.assertIn("treaty_compatibility", response["peer_advisory"])
+        self.assertIn("treaty posture", response["operator_summary"])
+        self.assertIn("recommended_action", response["peer_advisory"])
+        self.assertIn("peer_advisory", response["response"])
         alpha_peers = alpha.mesh.list_peers(limit=10)["peers"]
         beta_peers = beta.mesh.list_peers(limit=10)["peers"]
         self.assertEqual(alpha_peers[0]["peer_id"], "beta-node")
         self.assertEqual(beta_peers[0]["peer_id"], "alpha-node")
-        event_types = [event["event_type"] for event in alpha.mesh.stream_snapshot(limit=20)["events"]]
+        events = alpha.mesh.stream_snapshot(limit=20)["events"]
+        event_types = [event["event_type"] for event in events]
         self.assertIn("mesh.handshake.sent", event_types)
+        sent_event = next(event for event in events if event["event_type"] == "mesh.handshake.sent")
+        self.assertEqual(sent_event["payload"]["peer_advisory"]["peer_id"], "beta-node")
+        self.assertIn("operator_summary", sent_event["payload"]["peer_advisory"])
+        self.assertIn("accepted_peer_advisory", sent_event["payload"])
+        control_payload = server.build_control_stream_payload(alpha.mesh, since_seq=0, limit=20)
+        connected_advisories = control_payload["peer_advisories"]["connected"]
+        self.assertTrue(any(item["peer_id"] == "beta-node" for item in connected_advisories))
+        self.assertIn("recommended_action", connected_advisories[0])
 
     def test_sync_peer_imports_remote_events_updates_cursor_and_heartbeat(self):
         alpha = self.make_stack("alpha")
@@ -4548,12 +4565,21 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertGreaterEqual(synced["imported_events"], 1)
         self.assertGreater(synced["next_cursor"], 0)
         self.assertEqual(synced["heartbeat"]["status"], "active")
+        self.assertEqual(synced["peer_advisory"]["peer_id"], "beta-node")
+        self.assertIn("treaty_compatibility", synced["peer_advisory"])
+        self.assertIn("treaty posture", synced["operator_summary"])
 
         remote_events = alpha.mesh.list_remote_events("beta-node", limit=20)
         self.assertIn("mesh.synthetic.remote", {event["event_type"] for event in remote_events})
         peer = alpha.mesh.list_peers(limit=10)["peers"][0]
         self.assertEqual(peer["sync_state"]["remote_cursor"], synced["next_cursor"])
         self.assertEqual(peer["heartbeat"]["status"], "active")
+        stream = alpha.mesh.stream_snapshot(limit=20)
+        synced_event = next(event for event in stream["events"] if event["event_type"] == "mesh.peer.synced")
+        heartbeat_event = next(event for event in stream["events"] if event["event_type"] == "mesh.peer.heartbeat")
+        self.assertEqual(synced_event["payload"]["peer_advisory"]["peer_id"], "beta-node")
+        self.assertEqual(heartbeat_event["payload"]["peer_advisory"]["peer_id"], "beta-node")
+        self.assertIn("recommended_action", synced_event["payload"]["peer_advisory"])
 
         resynced = alpha.mesh.sync_peer("beta-node", client=beta_client, limit=50)
         self.assertEqual(resynced["imported_events"], 0)
@@ -4721,6 +4747,8 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("Resume Latest", probe.payload)
         self.assertIn("Resume Checkpoint", probe.payload)
         self.assertIn("Restart Mission", probe.payload)
+        self.assertIn("Treaty Posture", probe.payload)
+        self.assertIn("custody", probe.payload.lower())
         self.assertIn(checkpointed_mission["mission"]["id"], probe.payload)
         self.assertIn("Cancel Job", probe.payload)
         self.assertIn("/mesh/control/stream", probe.payload)
@@ -4751,6 +4779,7 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("qrcode.min.js", probe.payload)
         self.assertIn("Open Advanced Deck", probe.payload)
         self.assertIn("beta-node", probe.payload)
+        self.assertIn("TREATY AWARE", probe.payload)
         self.assertIn("127.0.0.1", probe.payload)
 
     def test_server_mesh_device_profile_handlers_round_trip_profile(self):
@@ -4898,6 +4927,9 @@ class SovereignMeshTests(unittest.TestCase):
         connected = alpha_client.connect_peer({"base_url": beta_base_url, "trust_tier": "trusted"})
         self.assertEqual(connected["status"], "ok")
         self.assertEqual(connected["peer"]["peer_id"], "beta-node")
+        self.assertEqual(connected["peer_advisory"]["peer_id"], "beta-node")
+        self.assertIn("treaty_compatibility", connected["peer_advisory"])
+        self.assertIn("operator_summary", connected)
 
         original = alpha.mesh.suggest_local_scan_urls
         alpha.mesh.suggest_local_scan_urls = lambda **_: [beta_base_url]
@@ -4908,6 +4940,7 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(connected_all["status"], "ok")
         self.assertGreaterEqual(connected_all["already_connected"] + connected_all["connected"], 1)
         self.assertIn("mesh", connected_all)
+        self.assertIn("operator_summary", connected_all)
 
         diagnostics = alpha_client.connectivity_diagnostics()
         self.assertEqual(diagnostics["status"], "ok")
@@ -5102,12 +5135,15 @@ class SovereignMeshTests(unittest.TestCase):
         payload = server.build_control_stream_payload(alpha.mesh, since_seq=0, limit=20)
 
         self.assertEqual(payload["type"], "control_state")
+        self.assertIn("peer_advisories", payload)
         self.assertIn("state", payload)
         self.assertIn("control_stream", payload["state"])
         self.assertEqual(payload["state"]["control_stream"]["route"], "/mesh/control/stream")
         self.assertGreaterEqual(payload["cursor"], 1)
         self.assertTrue(any(event["event_type"] == "mesh.mission.launched" for event in payload["events"]))
         self.assertEqual(payload["state"]["missions"]["missions"][0]["title"], "Stream Mission")
+        self.assertIn("connected", payload["peer_advisories"])
+        self.assertIn("counts", payload["peer_advisories"])
 
     def test_control_stream_is_exposed_over_http(self):
         alpha = self.make_stack("alpha")
@@ -5304,6 +5340,9 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertTrue(continuity["safe_devices"])
         self.assertEqual(continuity["available_actions"][0]["action"], "resume")
         self.assertTrue(continuity["treaty_validation"]["satisfied"])
+        self.assertTrue(continuity["safe_devices"][0]["treaty_capabilities"]["treaty_documents"])
+        self.assertIn("advisory_state", continuity["safe_devices"][0]["treaty_compatibility"])
+        self.assertIsInstance(continuity["recommended_treaty_device"], dict)
 
     def test_mission_continuity_summary_surfaces_treaty_audit(self):
         beta = self.make_stack("beta")

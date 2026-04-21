@@ -88,6 +88,7 @@ That is the difference between *scripts on a few boxes* and a real compute proto
 - Durable notifications and approvals
 - Mission layer above jobs and cooperative tasks
 - Mobile-friendly sovereign control deck
+- Treaty-aware peer posture, custody hints, and operator summaries
 
 </details>
 
@@ -137,6 +138,7 @@ Some devices are powerful. Some are private. Some are fragile. Some are approval
 - **Cooperative Tasks** — one logical task split across multiple peers
 - **Artifacts** — bundles, checkpoints, logs, attestations, and replicated results
 - **Helpers** — extra devices enlisted when the local node is under pressure
+- **Treaty Advisories** — peer-level continuity, custody, and governance compatibility hints
 
 ---
 
@@ -217,6 +219,7 @@ The advanced deck is phone-friendly, so your phone can act as a real operator co
 - Cooperative tasks and missions
 - Autonomy posture
 - Offload memory
+- Treaty/custody compatibility, restore-target hints, and live peer advisory events
 
 For remote UI testing on a fresh standalone node, use:
 
@@ -263,6 +266,14 @@ Current baseline: **147 tests passing.**
 - broad regression suite remains green at 147 passing tests
 - continuity alpha now includes a 7026 vision document plus mission continuity vessel planning, verification, dry-run restore planning, `vessel`/`witness` artifact export, continuity metadata in manifests and mission state, continuity-aware scheduler explanations, additive treaty-aware continuity validation, and treaty posture surfaced in manifests and continuity summaries
 
+**Current main after v0.1.2**
+
+- peer and discovery projections now expose treaty compatibility and custody-readiness hints
+- connect, sync, and handshake flows return plain-language `operator_summary` and `recommended_action` fields
+- peer lifecycle events and control-stream payloads carry compact treaty advisory state for live operator surfaces
+- mission continuity now recommends treaty/custody-capable restore targets when available
+- easy setup and the advanced control deck surface treaty posture without requiring raw JSON inspection
+
 **Implemented in the current runtime**
 
 - standalone local node startup
@@ -270,10 +281,11 @@ Current baseline: **147 tests passing.**
 - queued jobs, missions, cooperative tasks, and recovery controls
 - helper enlistment, mesh pressure, and operator approvals
 - built-in `/control` operator UI
+- treaty-aware continuity advisories across peer cards, mission summaries, connect/sync responses, and live streams
 
 **Still evolving**
 
-- richer treaty and custody semantics beyond the current continuity-groundwork layer
+- richer treaty and custody enforcement beyond the current advisory and continuity-specific layer
 - continuity-vessel and richer artifact lineage work
 - broader multi-device orchestration UX
 
