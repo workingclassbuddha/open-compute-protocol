@@ -5,7 +5,7 @@ This is the fastest way to get **The Open Compute Protocol** running locally.
 ## 1. Clone the repo
 
 ```bash
-git clone https://github.com/matthewacator-cpu/open-compute-protocol.git
+git clone https://github.com/workingclassbuddha/open-compute-protocol.git
 cd open-compute-protocol
 ```
 

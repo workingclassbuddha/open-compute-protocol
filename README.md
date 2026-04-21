@@ -153,7 +153,7 @@ Some devices are powerful. Some are private. Some are fragile. Some are approval
 ## Quick Start
 
 ```bash
-git clone https://github.com/matthewacator-cpu/open-compute-protocol.git
+git clone https://github.com/workingclassbuddha/open-compute-protocol.git
 cd open-compute-protocol
 python3 scripts/start_ocp_easy.py
 ```
