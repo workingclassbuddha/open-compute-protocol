@@ -14,6 +14,8 @@ class MeshMissionService:
         mesh,
         *,
         compact_text,
+        loads_json,
+        mission_record_type,
         normalize_mission_continuity,
         normalize_mission_policy,
         normalize_mission_priority,
@@ -26,6 +28,8 @@ class MeshMissionService:
     ):
         self.mesh = mesh
         self._compact_text = compact_text
+        self._loads_json = loads_json
+        self._mission_record_type = mission_record_type
         self._normalize_mission_continuity = normalize_mission_continuity
         self._normalize_mission_policy = normalize_mission_policy
         self._normalize_mission_priority = normalize_mission_priority
@@ -35,6 +39,33 @@ class MeshMissionService:
         self._normalize_workload_class = normalize_workload_class
         self._unique_tokens = unique_tokens
         self._utcnow = utcnow
+
+    def row_to_mission(self, row) -> Optional[dict]:
+        if row is None:
+            return None
+        mission = self._mission_record_type(
+            id=row["id"],
+            request_id=row["request_id"] or "",
+            title=row["title"] or "",
+            intent=row["intent"] or "",
+            status=self._normalize_mission_status(row["status"]),
+            priority=self._normalize_mission_priority(row["priority"]),
+            workload_class=self._normalize_workload_class(row["workload_class"]),
+            origin_peer_id=row["origin_peer_id"] or self.mesh.node_id,
+            target_strategy=self._normalize_target_strategy(row["target_strategy"]),
+            policy=self._normalize_mission_policy(self._loads_json(row["policy"], {})),
+            continuity=self._normalize_mission_continuity(self._loads_json(row["continuity"], {})),
+            metadata=self._loads_json(row["metadata"], {}),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        ).to_dict()
+        return mission | {
+            "child_job_ids": self._unique_tokens(self._loads_json(row["child_job_ids"], [])),
+            "cooperative_task_ids": self._unique_tokens(self._loads_json(row["cooperative_task_ids"], [])),
+            "latest_checkpoint_ref": dict(self._loads_json(row["latest_checkpoint_ref"], {})),
+            "result_ref": dict(self._loads_json(row["result_ref"], {})),
+            "result_bundle_ref": dict(self._loads_json(row["result_bundle_ref"], {})),
+        }
 
     def store_mission_row(
         self,

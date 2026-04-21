@@ -167,6 +167,7 @@ Related planning docs:
 ## Key OCP surfaces in this repo
 
 - Manifest: `GET /mesh/manifest`
+- HTTP contract and schema snapshot: `GET /mesh/contract`
 - Easy setup UI: `GET /`
 - Alternate easy setup UI: `GET /easy`
 - Phone control UI: `GET /control`
@@ -228,6 +229,8 @@ Related planning docs:
 - Helper preference set: `POST /mesh/helpers/preferences/set`
 - Helper autonomy evaluate: `GET /mesh/helpers/autonomy`
 - Helper autonomy run: `POST /mesh/helpers/autonomy/run`
+
+`/mesh/contract` now exposes the grouped route contract, reusable protocol schema registry, and schema refs used by the first lightweight ingress validation path.
 - Secret list: `GET /mesh/secrets`
 - Secret put: `POST /mesh/secrets/put`
 - Worker heartbeat: `POST /mesh/workers/{worker_id}/heartbeat`
@@ -264,4 +267,4 @@ python3 -m unittest tests.test_sovereign_mesh
 ```
 
 Current standalone baseline:
-- `tests.test_sovereign_mesh`: 147 tests passing
+- `tests.test_sovereign_mesh`: 154 tests passing

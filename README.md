@@ -10,7 +10,7 @@
 
 **A sovereign, local-first compute fabric for trusted devices.**
 
-[![Tests](https://img.shields.io/badge/tests-147%20passing-00FF88?style=flat-square&labelColor=06090F)](./tests/test_sovereign_mesh.py)
+[![Tests](https://img.shields.io/badge/tests-154%20passing-00FF88?style=flat-square&labelColor=06090F)](./tests/test_sovereign_mesh.py)
 [![Release](https://img.shields.io/badge/release-v0.1.2-F6C177?style=flat-square&labelColor=06090F)](./README.md#current-status)
 [![Version](https://img.shields.io/badge/wire%20version-sovereign--mesh%2Fv1-00D4FF?style=flat-square&labelColor=06090F)](./docs/OCP_STATUS.md)
 [![Status](https://img.shields.io/badge/status-active%20development-C8A96E?style=flat-square&labelColor=06090F)](./docs/OCP_MASTER_PLAN.md)
@@ -128,7 +128,7 @@ Some devices are powerful. Some are private. Some are fragile. Some are approval
 | `runtime.py` | Standalone SQLite-backed substrate |
 | `server.py` | `/mesh/*` HTTP API and `/control` operator UI |
 | `docs/` | Protocol notes, status, and roadmap |
-| `tests/test_sovereign_mesh.py` | Regression suite — 147 tests |
+| `tests/test_sovereign_mesh.py` | Regression suite — 154 tests |
 
 **Key runtime concepts:**
 
@@ -252,7 +252,7 @@ python3 -m unittest tests.test_sovereign_mesh
 python3 server.py --help
 ```
 
-Current baseline: **147 tests passing.**
+Current baseline: **154 tests passing.**
 
 ---
 
@@ -263,7 +263,7 @@ Current baseline: **147 tests passing.**
 - protocol-kernel refactor that extracts real subsystem seams for protocol, state, scheduler, execution, artifacts, missions, helpers, and governance
 - `SovereignMesh` retained as the stable façade so routes, persistence, and current behavior stay compatible
 - execution boundary now owns runtime adapters, job submission and acceptance orchestration, and result packaging
-- broad regression suite remains green at 147 passing tests
+- broad regression suite remains green at 154 passing tests
 - continuity alpha now includes a 7026 vision document plus mission continuity vessel planning, verification, dry-run restore planning, `vessel`/`witness` artifact export, continuity metadata in manifests and mission state, continuity-aware scheduler explanations, additive treaty-aware continuity validation, and treaty posture surfaced in manifests and continuity summaries
 
 **Current main after v0.1.2**
@@ -273,6 +273,7 @@ Current baseline: **147 tests passing.**
 - peer lifecycle events and control-stream payloads carry compact treaty advisory state for live operator surfaces
 - mission continuity now recommends treaty/custody-capable restore targets when available
 - easy setup and the advanced control deck surface treaty posture without requiring raw JSON inspection
+- server internals now have grouped route modules plus a `/mesh/contract` snapshot with reusable protocol schemas and lightweight ingress validation for the live HTTP surface
 
 **Implemented in the current runtime**
 
@@ -282,6 +283,7 @@ Current baseline: **147 tests passing.**
 - helper enlistment, mesh pressure, and operator approvals
 - built-in `/control` operator UI
 - treaty-aware continuity advisories across peer cards, mission summaries, connect/sync responses, and live streams
+- code-owned `/mesh/contract` route map, schema registry, and validation helpers for protocol and conformance work
 
 **Still evolving**
 

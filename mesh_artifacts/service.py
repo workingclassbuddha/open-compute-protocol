@@ -13,6 +13,7 @@ class MeshArtifactService:
         self,
         mesh,
         *,
+        artifact_ref_type,
         b64decode,
         b64encode,
         loads_json,
@@ -23,6 +24,7 @@ class MeshArtifactService:
         utcnow,
     ):
         self.mesh = mesh
+        self._artifact_ref_type = artifact_ref_type
         self._b64decode = b64decode
         self._b64encode = b64encode
         self._loads_json = loads_json
@@ -31,6 +33,31 @@ class MeshArtifactService:
         self._oci_digest = oci_digest
         self._sha256_bytes = sha256_bytes
         self._utcnow = utcnow
+
+    def row_to_artifact(self, row) -> dict:
+        metadata = self._loads_json(row["metadata"], {})
+        artifact = self._artifact_ref_type(
+            id=row["id"],
+            digest=row["digest"],
+            media_type=row["media_type"],
+            size_bytes=int(row["size_bytes"] or 0),
+            owner_peer_id=row["owner_peer_id"],
+            policy=self._normalize_policy(self._loads_json(row["policy"], {})),
+            path=row["path"],
+            created_at=row["created_at"],
+            metadata=metadata,
+            retention_class=self._normalize_retention_class(row["retention_class"] or metadata.get("retention_class")),
+            retention_deadline_at=row["retention_deadline_at"] or "",
+            download_url=f"{self.mesh.base_url}/mesh/artifacts/{row['id']}",
+        ).to_dict()
+        return artifact | {
+            "artifact_kind": str(metadata.get("artifact_kind") or "").strip(),
+            "artifact_type": str(metadata.get("artifact_type") or "").strip(),
+            "pinned": self.artifact_is_pinned({"metadata": metadata}),
+            "artifact_sync": dict(metadata.get("artifact_sync") or {}),
+            "mirror_verification": dict(metadata.get("mirror_verification") or {}),
+            "oci_descriptor": self.mesh._oci_descriptor(artifact, annotations=dict(metadata.get("oci_annotations") or {})),
+        }
 
     def artifact_path(self, artifact_id: str) -> Path:
         return self.mesh.artifact_root / f"{artifact_id}.blob"

@@ -22,6 +22,14 @@ if root_str not in sys.path:
     sys.path.insert(0, root_str)
 
 import server
+import server_artifacts
+import server_connect
+import server_control
+import server_contract
+import server_missions
+import server_ops
+import server_routes
+import server_runtime
 from mesh import (
     MeshArtifactAccessError,
     MeshPeerClient,
@@ -30,6 +38,7 @@ from mesh import (
     MeshSignatureError,
     SovereignMesh,
 )
+from mesh_protocol import SCHEMA_VERSION, get_protocol_schema, list_protocol_schemas, validate_protocol_object
 from runtime import OCPRegistry, OCPStore
 
 START_OCP_EASY = ROOT / "scripts" / "start_ocp_easy.py"
@@ -84,8 +93,11 @@ class ProbeHandler:
 
 
 ProbeHandler._mesh = server.OCPHandler._mesh
+ProbeHandler._dispatch_get_request = server.OCPHandler._dispatch_get_request
+ProbeHandler._dispatch_post_request = server.OCPHandler._dispatch_post_request
 ProbeHandler._handle_control_page = server.OCPHandler._handle_control_page
 ProbeHandler._handle_easy_page = server.OCPHandler._handle_easy_page
+ProbeHandler._handle_mesh_contract = server.OCPHandler._handle_mesh_contract
 ProbeHandler._handle_mesh_manifest = server.OCPHandler._handle_mesh_manifest
 ProbeHandler._handle_mesh_device_profile = server.OCPHandler._handle_mesh_device_profile
 ProbeHandler._handle_mesh_device_profile_update = server.OCPHandler._handle_mesh_device_profile_update
@@ -1160,6 +1172,11 @@ class SovereignMeshTests(unittest.TestCase):
         )
         fetched = beta.mesh.get_artifact(artifact["id"], include_content=False)
         self.assertEqual(fetched["id"], artifact["id"])
+        with beta.mesh._conn() as conn:
+            artifact_row = conn.execute("SELECT * FROM mesh_artifacts WHERE id=?", (artifact["id"],)).fetchone()
+        shaped_artifact = beta.mesh.artifacts.row_to_artifact(artifact_row)
+        self.assertEqual(shaped_artifact["id"], artifact["id"])
+        self.assertEqual(shaped_artifact["artifact_kind"], "bundle")
 
         decision = beta.mesh.scheduler.select_execution_target(
             {"kind": "custom.inline", "policy": {"classification": "trusted", "mode": "batch"}},
@@ -1167,6 +1184,25 @@ class SovereignMeshTests(unittest.TestCase):
         )
         self.assertEqual(decision["status"], "placed")
         self.assertEqual(decision["selected"]["target_type"], "local")
+
+        mission = beta.mesh.launch_mission(
+            title="Service Mission",
+            intent="Verify mission row shaping service seam",
+            request_id="service-mission-seam",
+            job={
+                "kind": "python.inline",
+                "dispatch_mode": "queued",
+                "requirements": {"capabilities": ["python"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "payload": {"code": "print('service mission seam')"},
+            },
+        )
+        with beta.mesh._conn() as conn:
+            mission_row = conn.execute("SELECT * FROM mesh_missions WHERE id=?", (mission["id"],)).fetchone()
+        shaped_mission = beta.mesh.missions.row_to_mission(mission_row)
+        self.assertEqual(shaped_mission["id"], mission["id"])
+        self.assertEqual(shaped_mission["title"], "Service Mission")
+        self.assertEqual(len(shaped_mission["child_job_ids"]), 1)
 
     def test_mesh_exposes_execution_service_for_agent_echo(self):
         beta = self.make_stack("beta-exec")
@@ -1280,10 +1316,14 @@ class SovereignMeshTests(unittest.TestCase):
 
         peers = alpha.mesh.state.list_peers(limit=10)
         self.assertEqual(peers["peers"][0]["peer_id"], "beta-state-node")
+        projected_peers = alpha.mesh.state.projections.list_peers(limit=10)
+        self.assertEqual(projected_peers["peers"][0]["peer_id"], "beta-state-node")
 
         candidates = alpha.mesh.state.list_discovery_candidates(limit=10)
         self.assertEqual(candidates["count"], 1)
         self.assertEqual(candidates["candidates"][0]["peer_id"], "beta-state-node")
+        projected_candidates = alpha.mesh.state.projections.list_discovery_candidates(limit=10)
+        self.assertEqual(projected_candidates["candidates"][0]["peer_id"], "beta-state-node")
 
         alpha.mesh.register_worker(
             worker_id="alpha-state-worker",
@@ -1294,6 +1334,8 @@ class SovereignMeshTests(unittest.TestCase):
         workers = alpha.mesh.state.list_workers(limit=10)
         self.assertEqual(workers["count"], 1)
         self.assertEqual(workers["workers"][0]["id"], "alpha-state-worker")
+        projected_workers = alpha.mesh.state.projections.list_workers(limit=10)
+        self.assertEqual(projected_workers["workers"][0]["id"], "alpha-state-worker")
 
     def test_seek_peers_discovers_and_auto_connects_reachable_peer(self):
         alpha = self.make_stack("alpha")
@@ -4885,6 +4927,531 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(probe.payload["mission"]["summary"]["cooperative_task_count"], 1)
         self.assertEqual(probe.payload["mission"]["summary"]["job_count"], 2)
 
+    def test_server_connect_module_exposes_easy_and_connect_surface(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        _, beta_base_url = self.serve_mesh(beta)
+
+        connected = server_connect.connect_peer(alpha.mesh, {"base_url": beta_base_url, "trust_tier": "trusted"})
+        self.assertEqual(connected["status"], "ok")
+        self.assertEqual(connected["peer"]["peer_id"], "beta-node")
+
+        synced = server_connect.sync_peer(alpha.mesh, {"peer_id": "beta-node", "limit": 12})
+        self.assertEqual(synced["status"], "ok")
+        self.assertEqual(synced["peer"]["peer_id"], "beta-node")
+
+        diagnostics = server_connect.connectivity_diagnostics(alpha.mesh)
+        self.assertEqual(diagnostics["status"], "ok")
+        self.assertIn("scan_urls", diagnostics)
+
+        launched = server_connect.launch_test_mission(alpha.mesh, {"peer_id": "beta-node"})
+        self.assertEqual(launched["status"], "ok")
+        self.assertEqual(launched["peer_id"], "beta-node")
+
+        whole_mesh = server_connect.launch_mesh_test_mission(alpha.mesh, {"include_local": True, "limit": 12})
+        self.assertEqual(whole_mesh["status"], "ok")
+        self.assertGreaterEqual(whole_mesh["mesh"]["peer_count"], 2)
+
+        bootstrap = server_connect.build_easy_bootstrap(alpha.mesh)
+        self.assertIn('"control_stream"', bootstrap)
+        self.assertIn('"connectivity"', bootstrap)
+
+        markup = server_connect.build_easy_page(alpha.mesh)
+        self.assertIn("OCP Easy Setup", markup)
+        self.assertIn("Connect Everything", markup)
+        self.assertIn("beta-node", markup)
+
+    def test_server_missions_module_exposes_operator_action_surface(self):
+        alpha = self.make_stack("alpha")
+        self._register_default_worker(alpha, worker_id="alpha-module-worker")
+
+        launched = server_missions.launch_mission(
+            alpha.mesh,
+            {
+                "title": "Module Mission",
+                "intent": "Exercise mission server module",
+                "request_id": "module-mission-1",
+                "job": {
+                    "kind": "python.inline",
+                    "dispatch_mode": "queued",
+                    "requirements": {"capabilities": ["python"]},
+                    "policy": {"classification": "trusted", "mode": "batch"},
+                    "payload": {"code": "print('module mission')"},
+                },
+            },
+        )
+        self.assertEqual(launched["status"], "waiting")
+
+        listed = server_missions.list_missions(alpha.mesh, limit=10)
+        self.assertEqual(listed["count"], 1)
+
+        fetched = server_missions.get_mission(alpha.mesh, launched["id"])
+        self.assertEqual(fetched["id"], launched["id"])
+
+        continuity = server_missions.get_mission_continuity(alpha.mesh, launched["id"])
+        self.assertEqual(continuity["mission_id"], launched["id"])
+
+        cancelled = server_missions.cancel_mission(alpha.mesh, launched["id"], {"operator_id": "module-ui"})
+        self.assertEqual(cancelled["mission"]["status"], "cancelled")
+
+        state = self._checkpointed_mission(alpha, worker_id="alpha-module-worker", request_id="module-mission-recovery")
+        resumed = server_missions.resume_mission(alpha.mesh, state["mission"]["id"], {"operator_id": "module-ui"})
+        self.assertEqual(resumed["mission"]["metadata"]["last_control_action"], "resume_latest")
+
+        task = server_missions.launch_cooperative_task(
+            alpha.mesh,
+            {
+                "name": "module-task",
+                "request_id": "module-task-1",
+                "target_peer_ids": ["alpha-node"],
+                "base_job": {
+                    "kind": "shell.command",
+                    "dispatch_mode": "queued",
+                    "requirements": {"capabilities": ["shell"]},
+                    "policy": {"classification": "trusted", "mode": "batch"},
+                    "payload": {"command": [sys.executable, "-c", "print('module-base')"]},
+                    "artifact_inputs": [],
+                },
+                "shards": [
+                    {"label": "local", "payload": {"command": [sys.executable, "-c", "print('module-local')"]}},
+                ],
+            },
+        )
+        self.assertEqual(task["shard_count"], 1)
+        self.assertEqual(server_missions.get_cooperative_task(alpha.mesh, task["id"])["id"], task["id"])
+
+    def test_server_ops_module_exposes_operator_runtime_surface(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_peer(base_url=beta_base_url, trust_tier="trusted")
+        alpha.mesh.sync_peer("beta-node", limit=20, refresh_manifest=True)
+
+        worker = server_ops.register_worker(
+            alpha.mesh,
+            {
+                "worker_id": "alpha-ops-worker",
+                "agent_id": alpha.agent_id,
+                "capabilities": ["worker-runtime", "shell"],
+                "resources": {"cpu": 1},
+            },
+        )
+        self.assertEqual(worker["status"], "ok")
+        self.assertEqual(server_ops.list_workers(alpha.mesh, limit=10)["count"], 1)
+
+        enlisted = server_ops.enlist_helper(alpha.mesh, {"peer_id": "beta-node"})
+        self.assertEqual(enlisted["state"], "enlisted")
+        self.assertGreaterEqual(server_ops.list_helpers(alpha.mesh, limit=10)["count"], 1)
+
+        preference = server_ops.set_offload_preference(
+            alpha.mesh,
+            {
+                "peer_id": "beta-node",
+                "workload_class": "gpu_inference",
+                "preference": "prefer",
+            },
+        )
+        self.assertEqual(preference["preference"], "prefer")
+        self.assertEqual(
+            server_ops.list_offload_preferences(alpha.mesh, limit=10, workload_class="gpu_inference")["count"],
+            1,
+        )
+
+        notification = server_ops.publish_notification(
+            alpha.mesh,
+            {
+                "notification_type": "job.summary",
+                "title": "Ops alert",
+                "body": "Needs attention",
+                "target_peer_id": "watch-node",
+            },
+        )
+        self.assertEqual(notification["status"], "ok")
+        listed_notifications = server_ops.list_notifications(alpha.mesh, limit=10, target_peer_id="watch-node")
+        self.assertEqual(listed_notifications["count"], 1)
+        acked = server_ops.ack_notification(
+            alpha.mesh,
+            notification["notification"]["id"],
+            {"status": "acked", "actor_peer_id": "watch-node"},
+        )
+        self.assertEqual(acked["notification"]["status"], "acked")
+
+        approval = server_ops.create_approval_request(
+            alpha.mesh,
+            {
+                "title": "Approve ops",
+                "summary": "Approve operation",
+                "target_peer_id": "watch-node",
+            },
+        )
+        self.assertEqual(server_ops.list_approvals(alpha.mesh, limit=10, target_peer_id="watch-node")["count"], 1)
+        resolved = server_ops.resolve_approval(
+            alpha.mesh,
+            approval["approval"]["id"],
+            {"decision": "approved", "operator_peer_id": "watch-node"},
+        )
+        self.assertEqual(resolved["approval"]["status"], "approved")
+
+        treaty = server_ops.propose_treaty(
+            alpha.mesh,
+            {
+                "treaty_id": "treaty/server-ops-v1",
+                "title": "Server Ops Treaty",
+                "summary": "Operator treaty",
+                "treaty_type": "continuity",
+            },
+        )
+        self.assertEqual(treaty["status"], "ok")
+        self.assertEqual(server_ops.list_treaties(alpha.mesh, limit=10, treaty_type="continuity")["count"], 1)
+        audit = server_ops.audit_treaty_requirements(
+            alpha.mesh,
+            {"treaty_requirements": ["treaty/server-ops-v1"], "operation": "continuity_export"},
+        )
+        self.assertEqual(audit["status"], "ok")
+        self.assertTrue(audit["validation"]["satisfied"])
+
+        secret = server_ops.put_secret(
+            alpha.mesh,
+            {"name": "ops-token", "scope": "mesh.ops", "value": "secret"},
+        )
+        self.assertEqual(secret["status"], "ok")
+        self.assertEqual(server_ops.list_secrets(alpha.mesh, limit=10, scope="mesh.ops")["count"], 1)
+
+        alpha.mesh.schedule_job(
+            {
+                "kind": "shell.command",
+                "dispatch_mode": "queued",
+                "requirements": {"capabilities": ["shell"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "payload": {"command": [sys.executable, "-c", "print('ops queue')"]},
+                "artifact_inputs": [],
+            },
+            request_id="ops-module-job",
+        )
+        self.assertEqual(server_ops.list_queue_messages(alpha.mesh, limit=10, status="queued")["count"], 1)
+        self.assertEqual(server_ops.queue_metrics(alpha.mesh)["counts"]["queued"], 1)
+        self.assertEqual(server_ops.list_scheduler_decisions(alpha.mesh, limit=10, status="placed")["count"], 1)
+
+    def test_server_runtime_module_exposes_core_protocol_surface(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        self._register_default_worker(beta, worker_id="beta-runtime-worker")
+
+        manifest = server_runtime.get_manifest(alpha.mesh)
+        self.assertEqual(manifest["protocol_short_name"], "OCP")
+
+        updated = server_runtime.update_device_profile(
+            alpha.mesh,
+            {"device_profile": {"device_class": "light", "network_profile": "wifi", "form_factor": "phone"}},
+        )
+        self.assertEqual(updated["device_profile"]["device_class"], "light")
+        self.assertEqual(server_runtime.get_device_profile(alpha.mesh)["device_profile"]["form_factor"], "phone")
+
+        alpha_manifest = alpha.mesh.get_manifest()
+        peer_card = dict(alpha_manifest["organism_card"])
+        peer_card["trust_tier"] = "trusted"
+        handshake = alpha.mesh.build_signed_envelope(
+            "/mesh/handshake",
+            {"peer_card": peer_card, "manifest": alpha_manifest, "request_id": "server-runtime-handshake"},
+        )
+        accepted = server_runtime.accept_handshake(beta.mesh, handshake)
+        self.assertEqual(accepted["status"], "ok")
+        self.assertEqual(server_runtime.list_peers(beta.mesh, limit=10)["count"], 1)
+
+        lease = server_runtime.acquire_lease(
+            beta.mesh,
+            {"peer_id": "alpha-node", "resource": "runtime/test", "ttl_seconds": 120},
+        )
+        self.assertEqual(lease["status"], "active")
+        lease = server_runtime.heartbeat_lease(beta.mesh, {"lease_id": lease["id"], "ttl_seconds": 180})
+        self.assertEqual(lease["ttl_seconds"], 180)
+        lease = server_runtime.release_lease(beta.mesh, {"lease_id": lease["id"], "status": "released"})
+        self.assertEqual(lease["status"], "released")
+
+        submitted = beta.mesh.submit_local_job(
+            {
+                "kind": "shell.command",
+                "dispatch_mode": "queued",
+                "requirements": {"capabilities": ["shell"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "payload": {"command": [sys.executable, "-c", "print('runtime module')"]},
+                "artifact_inputs": [],
+            },
+            request_id="runtime-module-job",
+        )
+        claimed = beta.mesh.claim_next_job("beta-runtime-worker", job_id=submitted["job"]["id"], ttl_seconds=120)
+        heartbeat = server_runtime.heartbeat_attempt(
+            beta.mesh,
+            claimed["attempt"]["id"],
+            {"ttl_seconds": 120, "metadata": {"phase": "runtime-module"}},
+        )
+        self.assertEqual(heartbeat["status"], "ok")
+        completed = server_runtime.complete_attempt(
+            beta.mesh,
+            claimed["attempt"]["id"],
+            {
+                "result": {"stdout": "runtime module\n", "stderr": "", "exit_code": 0},
+                "executor": "runtime-module",
+            },
+        )
+        self.assertEqual(completed["status"], "completed")
+
+        handoff = alpha.mesh.build_signed_envelope(
+            "/mesh/agents/handoff",
+            {
+                "handoff": {
+                    "to_peer_id": "beta-node",
+                    "from_agent": alpha.agent_id,
+                    "to_agent": beta.agent_id,
+                    "summary": "Runtime module handoff",
+                    "intent": "Continue runtime module verification",
+                    "constraints": {"project_id": "runtime-module"},
+                    "artifact_refs": [],
+                }
+            },
+        )
+        accepted_handoff = server_runtime.accept_handoff(beta.mesh, handoff)
+        self.assertEqual(accepted_handoff["status"], "accepted")
+
+        stream = server_runtime.stream_snapshot(beta.mesh, limit=20)
+        self.assertGreaterEqual(len(stream["events"]), 1)
+        self.assertTrue(stream["generated_at"])
+
+    def test_server_artifacts_module_exposes_artifact_transport_surface(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_peer(base_url=beta_base_url, trust_tier="trusted")
+
+        artifact = beta.mesh.publish_local_artifact(
+            {"kind": "artifact-module"},
+            media_type="application/json",
+            metadata={"artifact_kind": "bundle", "job_id": "artifact-module-job"},
+        )
+        listed = server_artifacts.list_artifacts(beta.mesh, limit=10, artifact_kind="bundle", job_id="artifact-module-job")
+        self.assertEqual(listed["count"], 1)
+        fetched = server_artifacts.get_artifact(beta.mesh, artifact["id"], include_content=False)
+        self.assertEqual(fetched["id"], artifact["id"])
+
+        replicated = server_artifacts.replicate_artifact(
+            alpha.mesh,
+            {"peer_id": "beta-node", "artifact_id": artifact["id"], "pin": True},
+        )
+        self.assertEqual(replicated["status"], "replicated")
+
+        verified = server_artifacts.verify_artifact_mirror(
+            alpha.mesh,
+            {
+                "artifact_id": replicated["artifact"]["id"],
+                "peer_id": "beta-node",
+                "source_artifact_id": artifact["id"],
+            },
+        )
+        self.assertEqual(verified["status"], "verified")
+
+        pinned = server_artifacts.set_artifact_pin(
+            alpha.mesh,
+            {"artifact_id": replicated["artifact"]["id"], "pinned": True, "reason": "module-pin"},
+        )
+        self.assertEqual(pinned["status"], "ok")
+
+        ephemeral = beta.mesh.publish_local_artifact(
+            "ephemeral artifact",
+            metadata={"artifact_kind": "log", "retention_class": "ephemeral", "retention_seconds": 60},
+        )
+        with beta.mesh._conn() as conn:
+            conn.execute(
+                "UPDATE mesh_artifacts SET retention_deadline_at=? WHERE id=?",
+                ("2000-01-01T00:00:00Z", ephemeral["id"]),
+            )
+            conn.commit()
+        purged = server_artifacts.purge_expired_artifacts(beta.mesh, {"limit": 10})
+        self.assertGreaterEqual(purged["purged"], 1)
+
+    def test_server_routes_module_dispatches_grouped_http_routes(self):
+        class RouteProbe:
+            def __init__(self):
+                self.calls = []
+
+            def _handle_easy_page(self):
+                self.calls.append(("easy",))
+
+            def _handle_control_stream(self, params):
+                self.calls.append(("control_stream", dict(params)))
+
+            def _handle_mesh_contract(self):
+                self.calls.append(("contract",))
+
+            def _handle_mesh_manifest(self):
+                self.calls.append(("manifest",))
+
+            def _handle_mesh_mission_continuity_get(self, path):
+                self.calls.append(("mission_continuity", path))
+
+            def _handle_mesh_mission_get(self, path):
+                self.calls.append(("mission_get", path))
+
+            def _handle_mesh_artifact_get(self, path, params):
+                self.calls.append(("artifact_get", path, dict(params)))
+
+            def _handle_mesh_notification_ack(self, path, data):
+                self.calls.append(("notification_ack", path, dict(data)))
+
+            def _handle_mesh_handoff(self, data):
+                self.calls.append(("handoff", dict(data)))
+
+        probe = RouteProbe()
+
+        self.assertIn("missions", server_routes.GET_ROUTE_GROUPS)
+        self.assertIn("runtime", server_routes.POST_ROUTE_GROUPS)
+        self.assertEqual(
+            server_routes.resolve_get_route("/mesh/missions/mission-1/continuity").handler_name,
+            "_handle_mesh_mission_continuity_get",
+        )
+        self.assertEqual(server_routes.resolve_get_route("/mesh/contract").handler_name, "_handle_mesh_contract")
+        self.assertEqual(
+            server_routes.resolve_post_route("/mesh/notifications/n-1/ack").handler_name,
+            "_handle_mesh_notification_ack",
+        )
+
+        self.assertTrue(server_routes.dispatch_get(probe, "/easy", {}))
+        self.assertTrue(server_routes.dispatch_get(probe, "/mesh/control/stream", {"since": ["4"]}))
+        self.assertTrue(server_routes.dispatch_get(probe, "/mesh/contract", {}))
+        self.assertTrue(server_routes.dispatch_get(probe, "/mesh/manifest", {}))
+        self.assertTrue(server_routes.dispatch_get(probe, "/mesh/missions/mission-1/continuity", {}))
+        self.assertTrue(server_routes.dispatch_get(probe, "/mesh/missions/mission-1", {}))
+        self.assertTrue(server_routes.dispatch_get(probe, "/mesh/artifacts/artifact-1", {"include_content": ["0"]}))
+        self.assertTrue(server_routes.dispatch_post(probe, "/mesh/notifications/n-1/ack", {"status": "acked"}))
+        self.assertTrue(server_routes.dispatch_post(probe, "/mesh/agents/handoff", {"handoff": {"summary": "route"}}))
+        self.assertFalse(server_routes.dispatch_get(probe, "/mesh/unknown", {}))
+        self.assertFalse(server_routes.dispatch_post(probe, "/mesh/unknown", {}))
+
+        self.assertEqual(
+            probe.calls,
+            [
+                ("easy",),
+                ("control_stream", {"since": ["4"]}),
+                ("contract",),
+                ("manifest",),
+                ("mission_continuity", "/mesh/missions/mission-1/continuity"),
+                ("mission_get", "/mesh/missions/mission-1"),
+                ("artifact_get", "/mesh/artifacts/artifact-1", {"include_content": ["0"]}),
+                ("notification_ack", "/mesh/notifications/n-1/ack", {"status": "acked"}),
+                ("handoff", {"handoff": {"summary": "route"}}),
+            ],
+        )
+
+        alpha = self.make_stack("alpha")
+        probe_handler = ProbeHandler()
+        probe_handler.server = SimpleNamespace(mesh=alpha.mesh)
+
+        handled = probe_handler._dispatch_get_request("/mesh/manifest", {})
+        self.assertTrue(handled)
+        self.assertEqual(probe_handler.payload["protocol_short_name"], "OCP")
+
+        handled = probe_handler._dispatch_post_request(
+            "/mesh/device-profile",
+            {"device_profile": {"device_class": "light", "network_profile": "wifi"}},
+        )
+        self.assertTrue(handled)
+        self.assertEqual(probe_handler.payload["device_profile"]["device_class"], "light")
+        self.assertFalse(probe_handler._dispatch_get_request("/mesh/not-real", {}))
+
+    def test_server_contract_module_exposes_mesh_route_contract(self):
+        snapshot = server_contract.build_contract_snapshot()
+        endpoints = snapshot["endpoints"]
+        endpoint_ids = {endpoint["id"] for endpoint in endpoints}
+
+        self.assertEqual(snapshot["status"], "ok")
+        self.assertEqual(snapshot["protocol_surface"], "/mesh/*")
+        self.assertEqual(snapshot["endpoint_count"], len(endpoints))
+        self.assertEqual(snapshot["schema_version"], SCHEMA_VERSION)
+        self.assertGreaterEqual(snapshot["schema_count"], 12)
+        self.assertIn("MeshManifest", snapshot["schemas"])
+        self.assertIn("SignedEnvelope", snapshot["schemas"])
+        self.assertIn("JobSubmission", snapshot["schemas"])
+        self.assertIn("ArtifactDescriptor", snapshot["schemas"])
+        self.assertIn("MissionContinuitySummary", snapshot["schemas"])
+        self.assertIn("TreatyAudit", snapshot["schemas"])
+        self.assertIn("runtime", snapshot["groups"])
+        self.assertIn("missions", snapshot["groups"])
+        self.assertIn("ops", snapshot["groups"])
+        self.assertIn("artifacts", snapshot["groups"])
+        self.assertIn("get:/mesh/contract", endpoint_ids)
+        self.assertIn("get:/mesh/missions/{mission_id}/continuity", endpoint_ids)
+        self.assertIn("post:/mesh/jobs/{job_id}/resume-from-checkpoint", endpoint_ids)
+        self.assertIn("post:/mesh/notifications/{notification_id}/ack", endpoint_ids)
+
+        mission_continuity = server_contract.contract_for("GET", "/mesh/missions/mission-1/continuity")
+        self.assertEqual(mission_continuity["path"], "/mesh/missions/{mission_id}/continuity")
+        self.assertEqual(mission_continuity["request"]["path"]["mission_id"], "string")
+        self.assertEqual(mission_continuity["response"]["schema_ref"], "MissionContinuitySummary")
+        self.assertTrue(mission_continuity["response"]["schema_available"])
+
+        queue_events = server_contract.contract_for("GET", "/mesh/queue/events")
+        self.assertEqual(queue_events["request"]["query"]["since_seq"], "integer")
+        self.assertEqual(queue_events["response"]["schema_ref"], "QueueEventList")
+
+        manifest_contract = server_contract.contract_for("GET", "/mesh/manifest")
+        self.assertEqual(manifest_contract["response"]["schema_ref"], "MeshManifest")
+        self.assertTrue(manifest_contract["response"]["schema_available"])
+
+        handshake_contract = server_contract.contract_for("POST", "/mesh/handshake")
+        self.assertEqual(handshake_contract["request"]["schema_ref"], "SignedEnvelope")
+
+        submit_contract = server_contract.contract_for("POST", "/mesh/jobs/submit")
+        self.assertEqual(submit_contract["request"]["schema_ref"], "SignedEnvelope")
+
+        ack_contract = server_contract.contract_for("POST", "/mesh/notifications/n-1/ack")
+        self.assertEqual(ack_contract["request"]["path"]["notification_id"], "string")
+        self.assertEqual(ack_contract["request"]["body"]["status"], "string")
+        self.assertIsNone(server_contract.contract_for("PATCH", "/mesh/manifest"))
+
+        manifest_schema = get_protocol_schema("MeshManifest")
+        self.assertIn("protocol_version", manifest_schema["required"])
+        self.assertIn("organism_card", manifest_schema["properties"])
+        self.assertIn("TreatyAudit", list_protocol_schemas())
+
+        valid_audit = validate_protocol_object(
+            "TreatyAuditRequest",
+            {"treaty_requirements": ["treaty/alpha"], "operation": "continuity_export"},
+        )
+        self.assertEqual(valid_audit["status"], "ok")
+
+        invalid_envelope = validate_protocol_object("SignedEnvelope", {"request": {}})
+        self.assertEqual(invalid_envelope["status"], "invalid")
+        self.assertTrue(any(issue["path"] == "$.body" for issue in invalid_envelope["issues"]))
+        self.assertTrue(any(issue["path"] == "$.request.node_id" for issue in invalid_envelope["issues"]))
+
+        alpha = self.make_stack("alpha")
+        probe_handler = ProbeHandler()
+        probe_handler.server = SimpleNamespace(mesh=alpha.mesh)
+        self.assertTrue(probe_handler._dispatch_get_request("/mesh/contract", {}))
+        self.assertEqual(probe_handler.payload["contract_version"], server_contract.CONTRACT_VERSION)
+        self.assertEqual(probe_handler.payload["schema_version"], SCHEMA_VERSION)
+        self.assertEqual(probe_handler.payload["endpoint_count"], snapshot["endpoint_count"])
+        self.assertIn("ArtifactDescriptor", probe_handler.payload["schemas"])
+
+        rejected = ProbeHandler()
+        rejected.server = SimpleNamespace(mesh=alpha.mesh)
+        self.assertTrue(rejected._dispatch_post_request("/mesh/handshake", {"request": {}}))
+        self.assertEqual(rejected.code, 400)
+        self.assertEqual(rejected.payload["error"], "protocol validation failed")
+        self.assertEqual(rejected.payload["protocol_validation"]["schema_ref"], "SignedEnvelope")
+
+        audit_validation = server_contract.validate_route_request(
+            "POST",
+            "/mesh/treaties/audit",
+            {"treaty_requirements": ["treaty/alpha"], "operation": "continuity_restore"},
+        )
+        self.assertEqual(audit_validation["status"], "ok")
+        invalid_audit = server_contract.validate_route_request(
+            "POST",
+            "/mesh/treaties/audit",
+            {"treaty_requirements": "treaty/alpha"},
+        )
+        self.assertEqual(invalid_audit["status"], "invalid")
+
     def test_device_profile_endpoint_is_exposed_over_http(self):
         alpha = self.make_stack("alpha")
         alpha_client, _ = self.serve_mesh(alpha)
@@ -5133,8 +5700,14 @@ class SovereignMeshTests(unittest.TestCase):
         )
 
         payload = server.build_control_stream_payload(alpha.mesh, since_seq=0, limit=20)
+        direct_payload = server_control.build_control_stream_payload(alpha.mesh, since_seq=0, limit=20)
+        bootstrap = server_control.build_control_bootstrap(alpha.mesh)
 
         self.assertEqual(payload["type"], "control_state")
+        self.assertEqual(direct_payload["type"], "control_state")
+        self.assertEqual(payload["cursor"], direct_payload["cursor"])
+        self.assertIn('"control_stream"', bootstrap)
+        self.assertIn("Stream Mission", bootstrap)
         self.assertIn("peer_advisories", payload)
         self.assertIn("state", payload)
         self.assertIn("control_stream", payload["state"])

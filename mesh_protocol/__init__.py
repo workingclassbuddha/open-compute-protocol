@@ -17,6 +17,13 @@ from .errors import (
     MeshReplayError,
     MeshSignatureError,
 )
+from .schemas import (
+    SCHEMA_VERSION,
+    build_protocol_schema_snapshot,
+    get_protocol_schema,
+    list_protocol_schemas,
+    validate_protocol_object,
+)
 from .treaties import normalize_treaty_document, normalize_treaty_status
 
 __all__ = [
@@ -28,6 +35,11 @@ __all__ = [
     "MeshProtocolService",
     "MeshReplayError",
     "MeshSignatureError",
+    "SCHEMA_VERSION",
+    "build_protocol_schema_snapshot",
+    "get_protocol_schema",
+    "list_protocol_schemas",
+    "validate_protocol_object",
     "normalize_treaty_document",
     "normalize_treaty_status",
     "OCP_RESULT_ARTIFACT_TYPE",
