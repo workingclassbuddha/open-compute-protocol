@@ -26,6 +26,7 @@ import server_app
 import server_artifacts
 import server_connect
 import server_control
+import server_control_page
 import server_contract
 import server_missions
 import server_ops
@@ -39,7 +40,13 @@ from mesh import (
     MeshSignatureError,
     SovereignMesh,
 )
-from mesh_protocol import SCHEMA_VERSION, get_protocol_schema, list_protocol_schemas, validate_protocol_object
+from mesh_protocol import (
+    SCHEMA_VERSION,
+    build_protocol_conformance_snapshot,
+    get_protocol_schema,
+    list_protocol_schemas,
+    validate_protocol_object,
+)
 from runtime import OCPRegistry, OCPStore
 
 START_OCP_EASY = ROOT / "scripts" / "start_ocp_easy.py"
@@ -1930,6 +1937,71 @@ class SovereignMeshTests(unittest.TestCase):
 
         self.assertEqual(verified["status"], "missing_remote")
         self.assertEqual(verified["artifact"]["mirror_verification"]["reason"], "remote_artifact_not_found")
+
+    def test_treaty_bound_vessel_replication_requires_custody_capable_peer(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack(
+            "beta-light",
+            device_profile={
+                "device_class": "full",
+                "execution_tier": "standard",
+                "network_profile": "broadband",
+                "approval_capable": True,
+                "secure_secret_capable": False,
+            },
+        )
+        self._register_default_worker(beta, worker_id="beta-light-worker")
+        beta_client, base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_peer(base_url=base_url, trust_tier="trusted")
+        alpha.mesh.propose_treaty(
+            treaty_id="treaty/custody-replication-v1",
+            title="Custody Replication Treaty",
+            document={"witness_required": True, "artifact_export": "sealed"},
+        )
+        beta.mesh.propose_treaty(
+            treaty_id="treaty/custody-replication-v1",
+            title="Custody Replication Treaty",
+            document={"witness_required": True, "artifact_export": "sealed"},
+        )
+        mission = beta.mesh.launch_mission(
+            title="Treaty Artifact Mission",
+            intent="Export a sealed continuity vessel",
+            request_id="treaty-artifact-replication",
+            continuity={
+                "resumable": True,
+                "checkpoint_strategy": "manual",
+                "treaty_requirements": ["treaty/custody-replication-v1"],
+            },
+            job={
+                "kind": "python.inline",
+                "dispatch_mode": "queued",
+                "requirements": {"capabilities": ["python"]},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "payload": {"code": "print('sealed vessel')"},
+                "metadata": {
+                    "retry_policy": {"max_attempts": 1},
+                    "resumability": {"enabled": True},
+                    "checkpoint_policy": {"enabled": True, "mode": "manual", "on_retry": False},
+                },
+            },
+        )
+        claimed = beta.mesh.claim_next_job("beta-light-worker", job_id=mission["child_job_ids"][0], ttl_seconds=120)
+        beta.mesh.fail_job_attempt(
+            claimed["attempt"]["id"],
+            error="sealed vessel checkpoint failure",
+            retryable=False,
+            metadata={"checkpoint": {"cursor": 5, "phase": "saved"}},
+        )
+        exported = beta.mesh.missions.export_continuity_vessel(mission["id"], dry_run=False)
+        remote_vessel = beta.mesh.get_artifact(exported["vessel_ref"]["id"], include_content=False)
+        self.assertEqual(remote_vessel["metadata"]["treaty_requirements"], ["treaty/custody-replication-v1"])
+
+        with self.assertRaises(MeshPolicyError):
+            alpha.mesh.replicate_artifact_from_peer(
+                beta.mesh.node_id,
+                artifact_id=exported["vessel_ref"]["id"],
+                client=beta_client,
+            )
 
     def test_bundle_graph_replication_pulls_linked_result_artifacts(self):
         alpha = self.make_stack("alpha")
@@ -4864,6 +4936,8 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("beta-node", probe.payload)
         self.assertIn("TREATY AWARE", probe.payload)
         self.assertIn("127.0.0.1", probe.payload)
+        self.assertIn("share_url", probe.payload)
+        self.assertIn("sharing_mode", probe.payload)
 
     def test_server_mesh_device_profile_handlers_round_trip_profile(self):
         alpha = self.make_stack("alpha")
@@ -4949,7 +5023,11 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(probe.code, 200)
         self.assertEqual(probe.payload["status"], "ok")
         self.assertIn("local_ipv4", probe.payload)
+        self.assertIn("lan_urls", probe.payload)
         self.assertIn("scan_urls", probe.payload)
+        self.assertIn("share_url", probe.payload)
+        self.assertIn("sharing_mode", probe.payload)
+        self.assertIn("share_advice", probe.payload)
 
         probe = ProbeHandler()
         probe._handle_mesh_mission_test_launch({"peer_id": "beta-node"})
@@ -5020,6 +5098,14 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("/mesh/manifest", markup)
         self.assertIn("/mesh/contract", markup)
         self.assertIn("Install this app", markup)
+
+    def test_server_control_page_module_renders_detached_control_shell(self):
+        alpha = self.make_stack("alpha")
+
+        markup = server_control_page.build_control_page(alpha.mesh)
+        self.assertIn("OCP Control Deck", markup)
+        self.assertIn("/mesh/control/stream", markup)
+        self.assertIn("Mesh Pulse", markup)
 
     def test_server_missions_module_exposes_operator_action_surface(self):
         alpha = self.make_stack("alpha")
@@ -5449,6 +5535,7 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("ArtifactDescriptor", snapshot["schemas"])
         self.assertIn("MissionContinuitySummary", snapshot["schemas"])
         self.assertIn("TreatyAudit", snapshot["schemas"])
+        self.assertIn("ProtocolConformanceSnapshot", snapshot["schemas"])
         self.assertIn("runtime", snapshot["groups"])
         self.assertIn("missions", snapshot["groups"])
         self.assertIn("ops", snapshot["groups"])
@@ -5478,6 +5565,9 @@ class SovereignMeshTests(unittest.TestCase):
         submit_contract = server_contract.contract_for("POST", "/mesh/jobs/submit")
         self.assertEqual(submit_contract["request"]["schema_ref"], "SignedEnvelope")
 
+        replicate_contract = server_contract.contract_for("POST", "/mesh/artifacts/replicate")
+        self.assertEqual(replicate_contract["request"]["body"]["digest"], "string")
+
         ack_contract = server_contract.contract_for("POST", "/mesh/notifications/n-1/ack")
         self.assertEqual(ack_contract["request"]["path"]["notification_id"], "string")
         self.assertEqual(ack_contract["request"]["body"]["status"], "string")
@@ -5487,6 +5577,21 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("protocol_version", manifest_schema["required"])
         self.assertIn("organism_card", manifest_schema["properties"])
         self.assertIn("TreatyAudit", list_protocol_schemas())
+        self.assertIn("ProtocolConformanceSnapshot", list_protocol_schemas())
+
+        conformance = snapshot["conformance"]
+        self.assertEqual(conformance["status"], "ok")
+        self.assertGreaterEqual(conformance["fixture_count"], 6)
+        self.assertEqual(conformance["invalid_fixture_count"], 0)
+        self.assertTrue(all(item["validation"]["status"] == "ok" for item in conformance["fixtures"]))
+
+        direct_conformance = build_protocol_conformance_snapshot()
+        self.assertEqual(direct_conformance["status"], "ok")
+        self.assertEqual(direct_conformance["invalid_fixture_count"], 0)
+        self.assertIn(
+            "signed-envelope-minimal",
+            {fixture["id"] for fixture in direct_conformance["fixtures"]},
+        )
 
         valid_audit = validate_protocol_object(
             "TreatyAuditRequest",
@@ -5507,6 +5612,7 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(probe_handler.payload["schema_version"], SCHEMA_VERSION)
         self.assertEqual(probe_handler.payload["endpoint_count"], snapshot["endpoint_count"])
         self.assertIn("ArtifactDescriptor", probe_handler.payload["schemas"])
+        self.assertEqual(probe_handler.payload["conformance"]["invalid_fixture_count"], 0)
 
         rejected = ProbeHandler()
         rejected.server = SimpleNamespace(mesh=alpha.mesh)
@@ -5527,6 +5633,38 @@ class SovereignMeshTests(unittest.TestCase):
             {"treaty_requirements": "treaty/alpha"},
         )
         self.assertEqual(invalid_audit["status"], "invalid")
+
+    def test_mesh_protocol_package_imports_cleanly_in_fresh_python_process(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from mesh_protocol import MeshPolicyError, MeshProtocolService, "
+                    "build_protocol_conformance_snapshot; "
+                    "snapshot = build_protocol_conformance_snapshot(); "
+                    "print(MeshPolicyError.__name__, MeshProtocolService.__name__, snapshot['status'])"
+                ),
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+        self.assertIn("MeshPolicyError MeshProtocolService ok", result.stdout.strip())
+
+    def test_protocol_conformance_check_script_passes(self):
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "check_protocol_conformance.py")],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+        self.assertIn("Protocol conformance snapshot:", result.stdout)
+        self.assertIn("Protocol conformance OK", result.stdout)
 
     def test_device_profile_endpoint_is_exposed_over_http(self):
         alpha = self.make_stack("alpha")
@@ -5776,6 +5914,38 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(start_ocp_easy.display_host_for_browser("172.20.10.11"), "172.20.10.11")
         self.assertEqual(start_ocp_easy.build_open_url("0.0.0.0", 8421), "http://127.0.0.1:8421/")
         self.assertEqual(start_ocp_easy.build_open_url("172.20.10.11", 8431, "/control"), "http://172.20.10.11:8431/control")
+
+    @mock.patch.object(start_ocp_easy, "discover_local_ipv4_addresses", return_value=["192.168.1.44", "10.0.0.21"])
+    def test_start_ocp_easy_helpers_surface_share_urls(self, _discover_local_ipv4_addresses):
+        self.assertEqual(
+            start_ocp_easy.share_urls_for_host("0.0.0.0", 8421),
+            ["http://192.168.1.44:8421/", "http://10.0.0.21:8421/"],
+        )
+        self.assertEqual(start_ocp_easy.share_urls_for_host("127.0.0.1", 8421), [])
+        self.assertEqual(
+            start_ocp_easy.share_urls_for_host("172.20.10.11", 8431),
+            ["http://172.20.10.11:8431/"],
+        )
+
+    def test_connectivity_diagnostics_surface_share_urls_and_bind_guidance(self):
+        alpha = self.make_stack("alpha")
+        with mock.patch("mesh.sovereign._discover_local_ipv4_addresses", return_value=["192.168.1.44", "10.0.0.21"]):
+            alpha.mesh.network_bind_host = "127.0.0.1"
+            local_only = alpha.mesh.connectivity_diagnostics()
+            self.assertEqual(local_only["sharing_mode"], "local")
+            self.assertEqual(local_only["lan_urls"], [])
+            self.assertEqual(local_only["share_url"], alpha.mesh.base_url)
+            self.assertIn("OCP_HOST=0.0.0.0", local_only["share_advice"])
+
+            alpha.mesh.network_bind_host = "0.0.0.0"
+            lan_ready = alpha.mesh.connectivity_diagnostics()
+            self.assertEqual(lan_ready["sharing_mode"], "lan")
+            self.assertEqual(
+                lan_ready["lan_urls"],
+                ["http://192.168.1.44:8421", "http://10.0.0.21:8421"],
+            )
+            self.assertEqual(lan_ready["share_url"], "http://192.168.1.44:8421")
+            self.assertEqual(lan_ready["share_advice"], "")
 
     def test_control_stream_payload_includes_state_and_recent_events(self):
         alpha = self.make_stack("alpha")
@@ -6124,6 +6294,8 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(restore_plan["mission_id"], mission["id"])
         self.assertEqual(restore_plan["recommended_action"], "resume")
         self.assertTrue(restore_plan["artifacts"]["checkpoint"]["available"])
+        self.assertTrue(restore_plan["artifact_readiness"]["checkpoint"]["available"])
+        self.assertEqual(restore_plan["warnings"], [])
 
     def test_continuity_treaty_validation_surfaces_in_export_verify_and_restore(self):
         beta = self.make_stack("beta")
@@ -6177,6 +6349,7 @@ class SovereignMeshTests(unittest.TestCase):
         vessel_payload = json.loads(base64.b64decode(vessel_artifact["content_base64"]).decode("utf-8"))
         self.assertEqual(vessel_payload["governance"]["treaty_requirements"], ["treaty/storage-v1"])
         self.assertTrue(vessel_payload["governance"]["treaty_validation"]["satisfied"])
+        self.assertEqual(vessel_artifact["metadata"]["treaty_requirements"], ["treaty/storage-v1"])
 
         verified = beta.mesh.missions.verify_continuity_vessel(exported["vessel_ref"]["id"])
         self.assertEqual(verified["status"], "verified")
@@ -6185,6 +6358,8 @@ class SovereignMeshTests(unittest.TestCase):
         restore_plan = beta.mesh.missions.plan_continuity_restore(exported["vessel_ref"]["id"])
         self.assertEqual(restore_plan["status"], "ready")
         self.assertTrue(restore_plan["treaty_validation"]["satisfied"])
+        self.assertTrue(restore_plan["governance"]["treaty_validation"]["satisfied"])
+        self.assertTrue(restore_plan["recommended_treaty_device"])
 
     def test_treaty_bound_restore_requires_custody_review_capable_target(self):
         beta = self.make_stack(

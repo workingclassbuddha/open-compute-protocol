@@ -774,6 +774,10 @@ EASY_PAGE_TEMPLATE = """<!doctype html>
       const peers = ((state.peers || {}).peers) || [];
       const candidates = ((state.discovery_candidates || {}).candidates) || [];
       const connectivity = state.connectivity || {};
+      const shareUrlValue = easyRootUrl(connectivity.share_url || connectivity.base_url);
+      const lanUrls = (connectivity.lan_urls || []).map(function (item) {
+        return easyRootUrl(item);
+      });
       const localSummary = document.getElementById("easy-local-summary");
       const localAddresses = document.getElementById("easy-addresses");
       const shareUrl = document.getElementById("easy-share-url");
@@ -832,20 +836,24 @@ EASY_PAGE_TEMPLATE = """<!doctype html>
       });
 
       localSummary.innerHTML = [
-        connectivity.base_url ? '<span class="easy-pill">' + escapeHtml("Share " + compactUrl(connectivity.base_url)) + '</span>' : "",
+        shareUrlValue ? '<span class="easy-pill">' + escapeHtml("Share " + compactUrl(shareUrlValue)) + '</span>' : "",
+        lanUrls.length ? '<span class="easy-pill">' + escapeHtml(String(lanUrls.length) + " LAN link(s) ready") + '</span>' : '<span class="easy-pill">' + escapeHtml("Local-only node") + '</span>',
         '<span class="easy-pill">' + escapeHtml(String(peers.length) + " connected computer(s)") + '</span>',
         '<span class="easy-pill">' + escapeHtml(String(candidates.length) + " discovered candidate(s)") + '</span>'
       ].filter(Boolean).join("");
 
       if (shareUrl) {
-        shareUrl.textContent = easyRootUrl(connectivity.base_url);
+        shareUrl.textContent = shareUrlValue;
       }
-      renderEasyQr(easyRootUrl(connectivity.base_url));
+      renderEasyQr(shareUrlValue);
 
       localAddresses.innerHTML = [
         connectivity.base_url ? '<span class="easy-pill">' + escapeHtml("Advertised " + compactUrl(connectivity.base_url)) + '</span>' : "",
+        lanUrls.map(function (item) {
+          return '<span class="easy-pill">' + escapeHtml("LAN " + compactUrl(item)) + '</span>';
+        }).join(""),
         (connectivity.local_ipv4 || []).map(function (item) {
-          return '<span class="easy-pill">' + escapeHtml(item) + '</span>';
+          return '<span class="easy-pill">' + escapeHtml("IP " + item) + '</span>';
         }).join("")
       ].filter(Boolean).join("");
 
@@ -853,6 +861,7 @@ EASY_PAGE_TEMPLATE = """<!doctype html>
       const checklistItems = [
         "Open this page on both computers and keep both of them on the same Wi-Fi.",
         "Press Scan Nearby first. If the other computer does not appear, copy your Easy Link and paste it into the other computer's manual connect box.",
+        connectivity.share_advice || "",
         recentErrors.length
           ? "A recent connect attempt failed. The most common fix is allowing Python through the firewall on the other computer."
           : "If nothing shows up yet, the other computer may still be starting up or blocked by a firewall."
@@ -860,7 +869,7 @@ EASY_PAGE_TEMPLATE = """<!doctype html>
       if (!(connectivity.local_ipv4 || []).length) {
         checklistItems.push("This computer does not currently report a local IPv4 address. Check that it is connected to a real local network.");
       }
-      checklist.innerHTML = checklistItems.map(function (item) {
+      checklist.innerHTML = checklistItems.filter(Boolean).map(function (item) {
         return "<li>" + escapeHtml(item) + "</li>";
       }).join("");
 

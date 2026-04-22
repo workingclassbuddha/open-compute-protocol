@@ -10,7 +10,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from mesh_protocol import build_protocol_schema_snapshot, get_protocol_schema, validate_protocol_object
+from mesh_protocol import (
+    build_protocol_conformance_snapshot,
+    build_protocol_schema_snapshot,
+    get_protocol_schema,
+    validate_protocol_object,
+)
 from server_routes import GET_ROUTE_GROUPS, POST_ROUTE_GROUPS, RouteSpec
 
 CONTRACT_VERSION = "ocp-http-contract/v1alpha1"
@@ -82,9 +87,9 @@ BODY_FIELDS: dict[str, dict[str, str]] = {
     "_handle_mesh_artifact_pin": {"artifact_id": "string", "pinned": "boolean", "reason": "string"},
     "_handle_mesh_artifact_publish": {"artifact": "object", "content": "any", "metadata": "object"},
     "_handle_mesh_artifact_purge": {"limit": "integer"},
-    "_handle_mesh_artifact_replicate": {"peer_id": "string", "artifact_id": "string", "pin": "boolean"},
-    "_handle_mesh_artifact_replicate_graph": {"peer_id": "string", "artifact_id": "string", "pin": "boolean"},
-    "_handle_mesh_artifact_verify_mirror": {"artifact_id": "string", "peer_id": "string", "source_artifact_id": "string"},
+    "_handle_mesh_artifact_replicate": {"peer_id": "string", "artifact_id": "string", "digest": "string", "pin": "boolean"},
+    "_handle_mesh_artifact_replicate_graph": {"peer_id": "string", "artifact_id": "string", "digest": "string", "pin": "boolean"},
+    "_handle_mesh_artifact_verify_mirror": {"artifact_id": "string", "peer_id": "string", "source_artifact_id": "string", "digest": "string"},
     "_handle_mesh_attempt_complete": {"result": "object", "executor": "string", "metadata": "object"},
     "_handle_mesh_attempt_fail": {"error": "string", "retryable": "boolean", "metadata": "object"},
     "_handle_mesh_attempt_heartbeat": {"ttl_seconds": "integer", "metadata": "object"},
@@ -257,6 +262,7 @@ def _iter_contracts(route_groups: dict[str, tuple[RouteSpec, ...]], method: str)
 
 def build_contract_snapshot() -> dict[str, Any]:
     schema_snapshot = build_protocol_schema_snapshot()
+    conformance_snapshot = build_protocol_conformance_snapshot()
     endpoints = [
         *_iter_contracts(GET_ROUTE_GROUPS, "GET"),
         *_iter_contracts(POST_ROUTE_GROUPS, "POST"),
@@ -279,6 +285,7 @@ def build_contract_snapshot() -> dict[str, Any]:
         "groups": groups,
         "endpoints": endpoints,
         "schemas": schema_snapshot["schemas"],
+        "conformance": conformance_snapshot,
     }
 
 

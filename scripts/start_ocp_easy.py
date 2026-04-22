@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -38,6 +40,62 @@ def display_host_for_browser(host: str) -> str:
     if host in {"0.0.0.0", "::", ""}:
         return "127.0.0.1"
     return host
+
+
+def is_wildcard_host(host: str) -> bool:
+    return str(host or "").strip().lower() in {"", "0.0.0.0", "::", "[::]"}
+
+
+def is_loopback_host(host: str) -> bool:
+    token = str(host or "").strip().lower()
+    return token == "localhost" or token.startswith("127.")
+
+
+def discover_local_ipv4_addresses(*, bind_host: str = "") -> list[str]:
+    seen: set[str] = set()
+    bind_token = str(bind_host or "").strip()
+    if bind_token and not is_wildcard_host(bind_token) and not is_loopback_host(bind_token):
+        try:
+            if ipaddress.ip_address(bind_token).version == 4:
+                seen.add(bind_token)
+        except ValueError:
+            pass
+    try:
+        addrinfo_rows = socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET, socket.SOCK_DGRAM)
+    except OSError:
+        addrinfo_rows = []
+    for family, _, _, _, sockaddr in addrinfo_rows:
+        if family != socket.AF_INET or not sockaddr:
+            continue
+        host = str(sockaddr[0] or "").strip()
+        if host and not is_wildcard_host(host) and not is_loopback_host(host):
+            seen.add(host)
+    for probe_host in ("192.0.2.1", "10.255.255.255"):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.connect((probe_host, 80))
+                host = str(sock.getsockname()[0] or "").strip()
+                if host and not is_wildcard_host(host) and not is_loopback_host(host):
+                    seen.add(host)
+        except OSError:
+            continue
+    return sorted(
+        (
+            host
+            for host in seen
+            if host and ipaddress.ip_address(host).version == 4
+        ),
+        key=lambda host: (not ipaddress.ip_address(host).is_private, host),
+    )
+
+
+def share_urls_for_host(host: str, port: int) -> list[str]:
+    token = str(host or "").strip()
+    if token and not is_wildcard_host(token) and not is_loopback_host(token):
+        return [f"http://{token}:{int(port)}/"]
+    if is_wildcard_host(token):
+        return [f"http://{address}:{int(port)}/" for address in discover_local_ipv4_addresses(bind_host=token)]
+    return []
 
 
 def build_open_url(host: str, port: int, path: str = "/") -> str:
@@ -134,11 +192,19 @@ def main() -> int:
     print()
     print("Advanced control module:")
     print(f"  {build_open_url(args.host, args.port, '/control')}")
-    if args.host in {"0.0.0.0", "::"}:
+    share_urls = share_urls_for_host(args.host, args.port)
+    if share_urls:
         print()
-        print("Other computers on your network:")
-        print(f"  use this machine's LAN IP with port {args.port}")
-        print(f"  example: http://192.168.1.44:{args.port}/")
+        print("LAN share URLs:")
+        for url in share_urls:
+            print(f"  {url}")
+    elif discover_local_ipv4_addresses(bind_host=args.host) and is_loopback_host(args.host):
+        print()
+        print("Detected local network IPs, but this node is local-only right now:")
+        for address in discover_local_ipv4_addresses(bind_host=args.host):
+            print(f"  {address}")
+        print("To share OCP with your phone or another laptop:")
+        print(f"  OCP_HOST=0.0.0.0 python3 {Path(__file__).name}")
 
     child = subprocess.Popen(command, cwd=str(repo_root))
     try:

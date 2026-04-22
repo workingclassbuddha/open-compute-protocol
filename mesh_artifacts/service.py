@@ -168,7 +168,7 @@ class MeshArtifactService:
             )
             conn.commit()
             updated_row = conn.execute("SELECT * FROM mesh_artifacts WHERE id=?", ((artifact_id or "").strip(),)).fetchone()
-        return self.mesh._row_to_artifact(updated_row)
+        return self.row_to_artifact(updated_row)
 
     def purge_expired_rows(self, *, limit: int = 100) -> int:
         with self.mesh._conn() as conn:
@@ -263,7 +263,7 @@ class MeshArtifactService:
                 "retention_class": ref.retention_class,
             },
         )
-        return self.mesh._row_to_artifact(row)
+        return self.row_to_artifact(row)
 
     def _reject_published_artifact(self, published: dict, *, message: str) -> None:
         artifact_path = Path(published["path"])
@@ -329,7 +329,7 @@ class MeshArtifactService:
         ):
             self.delete_artifact_row(row, reason="retention_expired")
             raise self.mesh.MeshArtifactAccessError("artifact expired")
-        artifact = self.mesh._row_to_artifact(row)
+        artifact = self.row_to_artifact(row)
         peer = self.mesh._row_to_peer(self.mesh._get_peer_row(requester_peer_id)) if requester_peer_id else None
         if requester_peer_id and not self.mesh._policy_allows_peer(artifact["policy"], peer):
             raise self.mesh.MeshArtifactAccessError("artifact policy denies access for peer")
@@ -385,7 +385,7 @@ class MeshArtifactService:
         parent_artifact_id_token = (parent_artifact_id or "").strip()
         artifacts = []
         for row in rows:
-            artifact = self.mesh._row_to_artifact(row)
+            artifact = self.row_to_artifact(row)
             metadata = dict(artifact.get("metadata") or {})
             if artifact_kind_token and (artifact.get("artifact_kind") or "").strip().lower() != artifact_kind_token:
                 continue
@@ -428,7 +428,7 @@ class MeshArtifactService:
 
     def find_local_artifact_by_digest(self, digest: str) -> Optional[dict]:
         row = self.artifact_row_by_digest(digest)
-        return self.mesh._row_to_artifact(row) if row is not None else None
+        return self.row_to_artifact(row) if row is not None else None
 
     def resolve_remote_artifact(
         self,
@@ -475,6 +475,71 @@ class MeshArtifactService:
             return dict(payload or {}) if isinstance(payload, dict) else {}
         except Exception:
             return {}
+
+    def _unique_tokens(self, values: Any) -> list[str]:
+        tokens: list[str] = []
+        seen: set[str] = set()
+        for value in list(values or []):
+            token = str(value or "").strip()
+            if not token or token in seen:
+                continue
+            seen.add(token)
+            tokens.append(token)
+        return tokens
+
+    def artifact_treaty_requirements(self, artifact: dict) -> list[str]:
+        metadata = dict(artifact.get("metadata") or {})
+        payload = self.artifact_json_payload(artifact)
+        governance = dict(payload.get("governance") or {})
+        continuity_overlay = dict(dict(payload.get("continuity") or {}).get("overlay") or {})
+        return self._unique_tokens(
+            metadata.get("treaty_requirements")
+            or governance.get("treaty_requirements")
+            or continuity_overlay.get("treaty_requirements")
+            or []
+        )
+
+    def artifact_replication_governance(self, peer_id: str, artifact: dict) -> dict:
+        treaty_requirements = self.artifact_treaty_requirements(artifact)
+        validation = self.mesh.validate_treaty_requirements(
+            treaty_requirements,
+            operation="artifact_replication",
+        )
+        peer = self.mesh._row_to_peer(self.mesh.state.get_peer_row(peer_id)) if peer_id else {}
+        compatibility = dict((peer or {}).get("treaty_compatibility") or {})
+        requires_custody = False
+        for treaty in list(validation.get("matched") or []):
+            document = dict((treaty or {}).get("document") or {})
+            if str(document.get("artifact_export") or "").strip().lower() == "sealed" or bool(document.get("witness_required")):
+                requires_custody = True
+                break
+        return {
+            "treaty_requirements": list(validation.get("required") or []),
+            "treaty_validation": validation,
+            "peer_treaty_compatibility": compatibility,
+            "requires_custody": requires_custody,
+        }
+
+    def ensure_artifact_replication_allowed(self, peer_id: str, artifact: dict) -> dict:
+        governance = self.artifact_replication_governance(peer_id, artifact)
+        treaty_requirements = list(governance.get("treaty_requirements") or [])
+        if not treaty_requirements:
+            return governance
+        validation = dict(governance.get("treaty_validation") or {})
+        if not validation.get("satisfied"):
+            raise self.mesh.MeshPolicyError(
+                "artifact replication requires active treaties for all treaty-bound artifacts"
+            )
+        compatibility = dict(governance.get("peer_treaty_compatibility") or {})
+        if not compatibility.get("shared_treaty_validation"):
+            raise self.mesh.MeshPolicyError(
+                "artifact replication requires a peer with shared treaty validation for treaty-bound artifacts"
+            )
+        if governance.get("requires_custody") and not compatibility.get("remote_custody_review"):
+            raise self.mesh.MeshPolicyError(
+                "artifact replication requires custody review support for sealed treaty-bound artifacts"
+            )
+        return governance
 
     def artifact_graph_targets(self, artifact: dict) -> list[dict]:
         metadata = dict(artifact.get("metadata") or {})
@@ -612,8 +677,9 @@ class MeshArtifactService:
             digest=digest_token,
             client=client,
             base_url=base_url,
-            include_content=True,
+            include_content=False,
         )
+        governance = self.ensure_artifact_replication_allowed(peer_token, remote_artifact)
         remote_digest = str(remote_artifact.get("digest") or "").strip().lower()
         if not remote_digest:
             raise self.mesh.MeshPolicyError("remote artifact missing digest")
@@ -634,6 +700,7 @@ class MeshArtifactService:
                 "source": {"peer_id": peer_token, "artifact_id": artifact_token, "digest": remote_digest},
             }
 
+        remote_artifact = remote_client.get_artifact(artifact_token, peer_id=self.mesh.node_id, include_content=True)
         content_base64 = str(remote_artifact.get("content_base64") or "").strip()
         if not content_base64:
             raise self.mesh.MeshPolicyError("remote artifact content missing")
@@ -687,14 +754,18 @@ class MeshArtifactService:
                 "digest": replicated["digest"],
                 "source_artifact_id": source_artifact_id,
                 "pinned": bool(pin),
+                "treaty_requirements": list(governance.get("treaty_requirements") or []),
             },
         )
-        return {
+        response = {
             "status": "replicated",
             "artifact": replicated,
             "source": {"peer_id": peer_token, "artifact_id": source_artifact_id, "digest": remote_digest},
             "verification": verification,
         }
+        if governance.get("treaty_requirements"):
+            response["governance"] = governance
+        return response
 
     def replicate_artifact_graph_from_peer(
         self,
@@ -716,8 +787,10 @@ class MeshArtifactService:
             digest=digest,
             client=client,
             base_url=base_url,
-            include_content=True,
+            include_content=False,
         )
+        root_governance = self.ensure_artifact_replication_allowed(peer_token, remote_root)
+        remote_root = remote_client.get_artifact(resolved_artifact_id, peer_id=self.mesh.node_id, include_content=True)
         root = self.replicate_artifact_from_peer(
             peer_token,
             artifact_id=resolved_artifact_id,
@@ -769,7 +842,7 @@ class MeshArtifactService:
                 "pinned": bool(pin),
             },
         )
-        return {
+        response = {
             "status": "replicated",
             "root": root,
             "artifacts": [root["artifact"], *[item["artifact"] for item in replicated_children if item.get("artifact")]],
@@ -780,6 +853,9 @@ class MeshArtifactService:
                 "linked": replicated_children,
             },
         }
+        if root_governance.get("treaty_requirements"):
+            response["governance"] = root_governance
+        return response
 
     def set_artifact_pin(self, artifact_id: str, *, pinned: bool = True, reason: str = "operator_pin") -> dict:
         row = self.artifact_row(artifact_id)

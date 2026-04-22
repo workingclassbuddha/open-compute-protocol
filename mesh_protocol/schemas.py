@@ -281,6 +281,28 @@ PROTOCOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "recommended_action": {"type": "string"},
         },
     },
+    "ConformanceFixture": {
+        "type": "object",
+        "required": ["id", "schema_ref", "value", "validation"],
+        "properties": {
+            "id": {"type": "string"},
+            "schema_ref": {"type": "string"},
+            "purpose": {"type": "string"},
+            "value": {"type": "object"},
+            "validation": {"type": "object"},
+        },
+    },
+    "ProtocolConformanceSnapshot": {
+        "type": "object",
+        "required": ["status", "fixture_count", "invalid_fixture_count", "fixtures"],
+        "properties": {
+            "status": {"type": "string"},
+            "schema_version": {"type": "string"},
+            "fixture_count": {"type": "integer"},
+            "invalid_fixture_count": {"type": "integer"},
+            "fixtures": {"type": "array", "items": {"$ref": "#/schemas/ConformanceFixture"}},
+        },
+    },
     "ContractSnapshot": {
         "type": "object",
         "required": ["status", "contract_version", "schema_version", "protocol_surface", "endpoints", "schemas"],
@@ -294,6 +316,7 @@ PROTOCOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "groups": {"type": "object"},
             "endpoints": {"type": "array", "items": {"type": "object"}},
             "schemas": {"type": "object"},
+            "conformance": {"$ref": "#/schemas/ProtocolConformanceSnapshot"},
         },
     },
 }

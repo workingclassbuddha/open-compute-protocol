@@ -23,6 +23,7 @@ That launcher:
 - opens the unified OCP app automatically in your browser
 - keeps easy setup available at `/easy`
 - keeps the advanced deck available at `/control`
+- prints detected LAN share URLs automatically when the node is reachable from other devices
 
 If you prefer the shell starter instead:
 

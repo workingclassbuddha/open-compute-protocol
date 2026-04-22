@@ -9,7 +9,6 @@ from .constants import (
     PROTOCOL_SHORT_NAME,
     PROTOCOL_VERSION,
 )
-from .envelopes import MeshProtocolService
 from .errors import (
     MeshArtifactAccessError,
     MeshError,
@@ -25,6 +24,8 @@ from .schemas import (
     validate_protocol_object,
 )
 from .treaties import normalize_treaty_document, normalize_treaty_status
+from .conformance import build_protocol_conformance_snapshot
+from .envelopes import MeshProtocolService
 
 __all__ = [
     "IMPLEMENTATION_NAME",
@@ -37,6 +38,7 @@ __all__ = [
     "MeshSignatureError",
     "SCHEMA_VERSION",
     "build_protocol_schema_snapshot",
+    "build_protocol_conformance_snapshot",
     "get_protocol_schema",
     "list_protocol_schemas",
     "validate_protocol_object",

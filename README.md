@@ -10,7 +10,7 @@
 
 **A sovereign, local-first compute fabric for trusted devices.**
 
-[![Tests](https://img.shields.io/badge/tests-156%20passing-00FF88?style=flat-square&labelColor=06090F)](./tests/test_sovereign_mesh.py)
+[![Tests](https://img.shields.io/badge/tests-160%20passing-00FF88?style=flat-square&labelColor=06090F)](./tests/test_sovereign_mesh.py)
 [![Release](https://img.shields.io/badge/release-v0.1.3-F6C177?style=flat-square&labelColor=06090F)](./README.md#current-status)
 [![Version](https://img.shields.io/badge/wire%20version-sovereign--mesh%2Fv1-00D4FF?style=flat-square&labelColor=06090F)](./docs/OCP_STATUS.md)
 [![Status](https://img.shields.io/badge/status-active%20development-C8A96E?style=flat-square&labelColor=06090F)](./docs/OCP_MASTER_PLAN.md)
@@ -128,8 +128,10 @@ Some devices are powerful. Some are private. Some are fragile. Some are approval
 | `runtime.py` | Standalone SQLite-backed substrate |
 | `server.py` | `/mesh/*` HTTP API, unified app shell, and operator UI routes |
 | `server_app.py` | Installable app shell that unifies setup, control, and protocol inspection |
+| `server_control_page.py` | Extracted control-deck renderer for the advanced operator surface |
+| `server_http_handlers.py` | Grouped HTTP route handlers so `server.py` stays a thin transport host |
 | `docs/` | Protocol notes, status, and roadmap |
-| `tests/test_sovereign_mesh.py` | Regression suite — 156 tests |
+| `tests/test_sovereign_mesh.py` | Regression suite — 160 tests |
 
 **Key runtime concepts:**
 
@@ -214,9 +216,10 @@ It now also supports:
 
 - `Copy My Easy Link` for manual fallback
 - QR pairing so the second device can open the pairing link by scanning instead of typing
+- automatic LAN/share URL detection in the easy page so the phone and spare laptop can see the best local address without manual IP hunting
 - one-button nearby mesh join with `Connect Everything`
 - one-button cooperative verification across the whole current mesh with `Test Whole Mesh`
-- an auto-open starter script at `python3 scripts/start_ocp_easy.py`
+- an auto-open starter script at `python3 scripts/start_ocp_easy.py`, which now also prints detected LAN URLs when the node is network-reachable
 
 The control module is phone-friendly, so your phone can act as a real operator console for the mesh. From there you can inspect and act on:
 
@@ -259,7 +262,7 @@ python3 -m unittest tests.test_sovereign_mesh
 python3 server.py --help
 ```
 
-Current baseline: **156 tests passing.**
+Current baseline: **158 tests passing.**
 
 ---
 
@@ -270,10 +273,10 @@ Current baseline: **156 tests passing.**
 - protocol-kernel refactor that extracts real subsystem seams for protocol, state, scheduler, execution, artifacts, missions, helpers, and governance
 - `SovereignMesh` retained as the stable façade so routes, persistence, and current behavior stay compatible
 - execution boundary now owns runtime adapters, job submission and acceptance orchestration, and result packaging
-- broad regression suite remains green at 156 passing tests
+- broad regression suite remains green at 160 passing tests
 - continuity alpha now includes a 7026 vision document plus mission continuity vessel planning, verification, dry-run restore planning, `vessel`/`witness` artifact export, continuity metadata in manifests and mission state, continuity-aware scheduler explanations, additive treaty-aware continuity validation, and treaty posture surfaced in manifests and continuity summaries
 
-**Also included in v0.1.3**
+**Current main after v0.1.3**
 
 - peer and discovery projections now expose treaty compatibility and custody-readiness hints
 - connect, sync, and handshake flows return plain-language `operator_summary` and `recommended_action` fields
@@ -281,7 +284,11 @@ Current baseline: **156 tests passing.**
 - mission continuity now recommends treaty/custody-capable restore targets when available
 - unified app shell at `/` and `/app` brings setup, control, and protocol inspection into one phone-friendly surface
 - easy setup and the advanced control deck still surface treaty posture without requiring raw JSON inspection
-- server internals now have grouped route modules plus a `/mesh/contract` snapshot with reusable protocol schemas and lightweight ingress validation for the live HTTP surface
+- server internals now have grouped route modules, a dedicated `server_control_page.py` renderer, and a `/mesh/contract` snapshot with reusable protocol schemas, conformance fixtures, and lightweight ingress validation for the live HTTP surface
+- `server.py` now delegates grouped route families through `server_http_handlers.py`, keeping the HTTP host thin while preserving the existing route surface
+- treaty-bound artifact replication now enforces active local treaties plus custody-capable remote peers for sealed continuity artifacts
+- the repo now includes `scripts/check_protocol_conformance.py`, and CI runs it before the broader regression suite so protocol drift and package-boundary regressions fail earlier
+- artifact and mission services now rely more directly on their own row mappers instead of routing those conversions back through `SovereignMesh`
 
 **Implemented in the current runtime**
 

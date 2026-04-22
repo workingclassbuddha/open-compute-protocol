@@ -139,12 +139,12 @@ class MeshMissionService:
             )
             conn.commit()
             row = conn.execute("SELECT * FROM mesh_missions WHERE request_id=?", ((request_id or "").strip(),)).fetchone()
-        return self.mesh._row_to_mission(row)
+        return self.row_to_mission(row)
 
     def existing_mission_by_request(self, request_id: str) -> Optional[dict]:
         with self.mesh._conn() as conn:
             row = conn.execute("SELECT * FROM mesh_missions WHERE request_id=?", ((request_id or "").strip(),)).fetchone()
-        return self.mesh._row_to_mission(row) if row is not None else None
+        return self.row_to_mission(row) if row is not None else None
 
     def mission_status_from_children(self, child_jobs: list[dict], cooperative_tasks: list[dict], metadata: dict) -> str:
         statuses = [str((job or {}).get("status") or "").strip().lower() for job in child_jobs if job]
@@ -817,6 +817,7 @@ class MeshMissionService:
                 "checkpoint_artifact_id": checkpoint_ref.get("id") or "",
                 "result_bundle_artifact_id": result_bundle_ref.get("id") or "",
                 "result_artifact_id": result_ref.get("id") or "",
+                "treaty_requirements": list(treaty_validation.get("required") or []),
             },
         )
         witness_payload["subject_artifact_id"] = vessel_ref.get("id") or ""
@@ -831,6 +832,7 @@ class MeshMissionService:
                 "mission_id": mission.get("id") or mission_id,
                 "subject_artifact_id": vessel_ref.get("id") or "",
                 "subject_digest": vessel_ref.get("digest") or "",
+                "treaty_requirements": list(treaty_validation.get("required") or []),
             },
         )
         self.mesh._record_event(
@@ -987,6 +989,7 @@ class MeshMissionService:
             )
         if not selected_target and safe_devices:
             selected_target = next((item for item in safe_devices if item.get("connected")), safe_devices[0])
+        selected_target_treaty = dict(selected_target.get("treaty_compatibility") or {})
 
         artifact_availability = dict(verification.get("artifact_availability") or {})
         checkpoint_state = dict(artifact_availability.get("checkpoint_ref") or {})
@@ -998,8 +1001,10 @@ class MeshMissionService:
 
         readiness = "ready"
         blockers: list[str] = []
+        warnings: list[str] = []
         if verification.get("status") != "verified":
             readiness = "attention_needed"
+            warnings.append("Continuity vessel verification is not fully green; review vessel warnings before restore.")
         if recommended_action == "resume" and not bool(checkpoint_state.get("available")):
             readiness = "blocked"
             blockers.append("Checkpoint artifact required for resume is not available.")
@@ -1010,7 +1015,13 @@ class MeshMissionService:
             readiness = "blocked"
             blockers.append("No continuity-safe target is currently available for treaty-bound restore.")
         if treaty_validation.get("required") and selected_target and not bool(
-            dict(selected_target.get("continuity_capabilities") or {}).get("custody_review")
+            selected_target_treaty.get("shared_treaty_validation")
+        ):
+            readiness = "blocked"
+            blockers.append("Selected continuity target does not advertise shared treaty validation for treaty-bound restore.")
+        if treaty_validation.get("required") and selected_target and not bool(
+            selected_target_treaty.get("remote_custody_review")
+            or dict(selected_target.get("continuity_capabilities") or {}).get("custody_review")
         ):
             readiness = "blocked"
             blockers.append("Selected continuity target does not support custody review for treaty-bound restore.")
@@ -1025,6 +1036,7 @@ class MeshMissionService:
             "vessel_artifact_id": vessel_artifact_id,
             "recommended_action": recommended_action,
             "target": selected_target,
+            "recommended_treaty_device": selected_target if treaty_required else {},
             "safe_devices": safe_devices,
             "preferred_target_device_classes": list(continuity.get("preferred_target_device_classes") or []),
             "artifacts": {
@@ -1032,9 +1044,19 @@ class MeshMissionService:
                 "result_bundle": result_bundle_state,
                 "result": result_state,
             },
+            "artifact_readiness": {
+                "checkpoint": checkpoint_state,
+                "result_bundle": result_bundle_state,
+                "result": result_state,
+            },
             "treaty_validation": treaty_validation,
+            "governance": {
+                "treaty_requirements": list(treaty_validation.get("required") or []),
+                "treaty_validation": treaty_validation,
+            },
             "verification": verification,
             "blockers": blockers,
+            "warnings": warnings,
             "operator_request": {
                 "operator_id": str(operator_id or "").strip(),
                 "reason": str(reason or "").strip(),
@@ -1212,7 +1234,7 @@ class MeshMissionService:
             row = conn.execute("SELECT * FROM mesh_missions WHERE id=?", ((mission_id or "").strip(),)).fetchone()
         if row is None:
             raise self.mesh.MeshPolicyError("mission not found")
-        return self.refresh_mission_runtime(self.mesh._row_to_mission(row))
+        return self.refresh_mission_runtime(self.row_to_mission(row))
 
     def list_missions(self, *, limit: int = 25, status: str = "") -> dict:
         with self.mesh._conn() as conn:

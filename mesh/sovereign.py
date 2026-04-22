@@ -150,7 +150,11 @@ def _discover_local_ipv4_addresses(*, bind_host: str = "") -> list[str]:
                 seen.add(bind_token)
         except ValueError:
             pass
-    for family, _, _, _, sockaddr in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET, socket.SOCK_DGRAM):
+    try:
+        addrinfo_rows = socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET, socket.SOCK_DGRAM)
+    except OSError:
+        addrinfo_rows = []
+    for family, _, _, _, sockaddr in addrinfo_rows:
         if family != socket.AF_INET or not sockaddr:
             continue
         host = str(sockaddr[0] or "").strip()
@@ -186,6 +190,24 @@ def _preferred_local_base_url(*, bind_host: str = "", port: int = 8421, scheme: 
     if addresses:
         return f"{scheme}://{addresses[0]}:{int(port)}"
     return f"{scheme}://127.0.0.1:{int(port)}"
+
+
+def _shareable_local_urls(*, bind_host: str = "", port: int = 8421, scheme: str = "http") -> list[str]:
+    host_token = str(bind_host or "").strip()
+    hosts: list[str] = []
+    if host_token and not _is_wildcard_or_loopback_host(host_token):
+        hosts.append(host_token)
+    elif _is_wildcard_host(host_token):
+        hosts.extend(_discover_local_ipv4_addresses(bind_host=bind_host))
+    seen: set[str] = set()
+    urls: list[str] = []
+    for host in hosts:
+        token = str(host or "").strip()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        urls.append(f"{scheme}://{token}:{int(port)}")
+    return urls
 
 
 ARTIFACT_RETENTION_DEFAULTS = {
@@ -2567,9 +2589,20 @@ class SovereignMesh:
 
     def connectivity_diagnostics(self, *, port: int = 0, limit: int = 24) -> dict:
         parsed_base = urlparse(self.base_url)
-        bind_host = parsed_base.hostname or ""
+        bind_host = str(getattr(self, "network_bind_host", "") or parsed_base.hostname or "").strip()
         resolved_port = int(port or parsed_base.port or 8421)
         local_addresses = _discover_local_ipv4_addresses(bind_host=bind_host)
+        lan_urls = _shareable_local_urls(bind_host=bind_host, port=resolved_port)
+        sharing_mode = "lan" if lan_urls else "local"
+        share_url = lan_urls[0] if lan_urls else _normalize_base_url(
+            self.base_url,
+            fallback_url=_preferred_local_base_url(bind_host=bind_host, port=resolved_port),
+        )
+        share_advice = ""
+        if sharing_mode == "local" and local_addresses and _is_loopback_host(bind_host):
+            share_advice = "This node is local-only right now. Restart with OCP_HOST=0.0.0.0 to share it with your phone or another laptop on Wi-Fi."
+        elif not local_addresses:
+            share_advice = "No local IPv4 address is visible yet. Check Wi-Fi or Ethernet before trying nearby device setup."
         candidate_rows = list(self.list_discovery_candidates(limit=8).get("candidates") or [])
         recent_errors = [
             {
@@ -2590,6 +2623,10 @@ class SovereignMesh:
             "bind_host": bind_host or "127.0.0.1",
             "port": resolved_port,
             "local_ipv4": local_addresses,
+            "lan_urls": lan_urls,
+            "share_url": share_url,
+            "sharing_mode": sharing_mode,
+            "share_advice": share_advice,
             "scan_urls": self.suggest_local_scan_urls(port=resolved_port, limit=limit),
             "recent_errors": recent_errors,
         }
