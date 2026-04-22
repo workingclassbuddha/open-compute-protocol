@@ -2444,6 +2444,7 @@ class SovereignMesh:
         *,
         client: Optional[MeshPeerClient] = None,
         base_url: Optional[str] = None,
+        timeout: Optional[float] = None,
     ) -> tuple[MeshPeerClient, dict]:
         if client is not None:
             if peer_id:
@@ -2454,7 +2455,7 @@ class SovereignMesh:
         endpoint_url = (base_url or (peer or {}).get("endpoint_url") or "").strip()
         if not endpoint_url:
             raise MeshPolicyError("peer endpoint_url is unavailable")
-        return MeshPeerClient(endpoint_url), peer or {}
+        return MeshPeerClient(endpoint_url, timeout=float(timeout or 8.0)), peer or {}
 
     def connect_peer(
         self,
@@ -7348,6 +7349,16 @@ class SovereignMesh:
     def submit_local_job(self, job: dict, *, request_id: Optional[str] = None) -> dict:
         return self.execution.submit_local_job(job, request_id=request_id)
 
+    def _remote_submission_timeout(self, job: dict) -> float:
+        job_body = dict(job or {})
+        kind = str(job_body.get("kind") or "").strip().lower()
+        dispatch_mode = self._job_dispatch_mode(kind, job_body)
+        if dispatch_mode == "queued":
+            return 8.0
+        if kind in {"python.inline", "shell.command", "docker.container", "wasm.component"}:
+            return 30.0
+        return 12.0
+
     def accept_job_submission(self, envelope: dict) -> dict:
         return self.execution.accept_job_submission(envelope)
 
@@ -7427,7 +7438,12 @@ class SovereignMesh:
         base_url: Optional[str] = None,
         request_id: Optional[str] = None,
     ) -> dict:
-        remote_client, _ = self._resolve_peer_client(peer_id, client=client, base_url=base_url)
+        remote_client, _ = self._resolve_peer_client(
+            peer_id,
+            client=client,
+            base_url=base_url,
+            timeout=self._remote_submission_timeout(job),
+        )
         envelope = self.build_signed_envelope("/mesh/jobs/submit", {"job": dict(job or {})}, request_id=request_id)
         response = remote_client.submit_job(envelope)
         self._record_event(

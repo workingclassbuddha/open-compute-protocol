@@ -4762,6 +4762,46 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("mesh.artifact.sent", event_types)
         self.assertIn("mesh.handoff.sent", event_types)
 
+    def test_dispatch_job_to_peer_uses_extended_timeout_for_inline_runtime_jobs(self):
+        alpha = self.make_stack("alpha")
+        captured = {}
+
+        class StubClient:
+            def submit_job(self, envelope):
+                captured["envelope"] = envelope
+                return {"status": "queued", "job": {"id": "remote-job-1"}}
+
+        original_resolve = alpha.mesh._resolve_peer_client
+
+        def fake_resolve(peer_id, **kwargs):
+            captured["peer_id"] = peer_id
+            captured["timeout"] = kwargs.get("timeout")
+            return StubClient(), {"peer_id": peer_id, "endpoint_url": "http://beta.example"}
+
+        alpha.mesh._resolve_peer_client = fake_resolve
+        try:
+            response = alpha.mesh.dispatch_job_to_peer(
+                "beta-node",
+                {
+                    "kind": "python.inline",
+                    "dispatch_mode": "inline",
+                    "origin": "alpha-node",
+                    "target": "beta-node",
+                    "requirements": {"capabilities": ["python"]},
+                    "policy": {"classification": "trusted", "mode": "batch"},
+                    "payload": {"code": "print('remote proof')"},
+                    "artifact_inputs": [],
+                },
+                request_id="extended-timeout-test",
+            )
+        finally:
+            alpha.mesh._resolve_peer_client = original_resolve
+
+        self.assertEqual(response["status"], "queued")
+        self.assertEqual(captured["peer_id"], "beta-node")
+        self.assertGreaterEqual(float(captured["timeout"] or 0), 30.0)
+        self.assertEqual(captured["envelope"]["request"]["request_id"], "extended-timeout-test")
+
     def test_server_mesh_peers_sync_handler_runs_single_peer_sync(self):
         alpha = self.make_stack("alpha")
         beta = self.make_stack("beta")
