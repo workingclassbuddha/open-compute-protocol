@@ -254,9 +254,40 @@ def build_protocol_conformance_snapshot() -> dict[str, Any]:
                     "healthy_route_count": 1,
                     "route_count": 1,
                     "latest_proof_status": "completed",
+                    "recovery_state": "healthy",
+                    "primary_peer": {
+                        "peer_id": "beta-node",
+                        "display_name": "Beta",
+                        "role": "compute",
+                        "status": "ready",
+                        "route": "http://192.168.1.22:8421",
+                        "summary": "Beta is best for compute right now.",
+                    },
+                    "device_roles": [
+                        {
+                            "peer_id": "alpha-node",
+                            "display_name": "Alpha",
+                            "role": "local_command",
+                            "status": "ready",
+                            "summary": "This Mac is the local command node.",
+                        },
+                        {
+                            "peer_id": "beta-node",
+                            "display_name": "Beta",
+                            "role": "compute",
+                            "status": "ready",
+                            "summary": "Beta is ready for compute work.",
+                        },
+                    ],
                     "blocking_issue": "",
+                    "blocker_code": "",
                     "next_fix": "No fix needed. The current mesh proof completed.",
                     "operator_summary": "Mesh is strong. Devices have proven routes and the latest proof completed.",
+                    "story": [
+                        "Mesh is strong.",
+                        "Beta is best for compute right now.",
+                        "Whole-mesh proof completed.",
+                    ],
                     "timeline": [
                         {
                             "kind": "proof_completed",

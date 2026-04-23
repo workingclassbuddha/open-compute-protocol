@@ -8,6 +8,7 @@ struct ExecutionView: View {
     var body: some View {
         let readiness = model.snapshot?.executionReadiness
         let targets = readiness?.targets ?? []
+        let demo = model.demoState
 
         MissionScroll(allowMotion: allowMotion) {
             PageHeader(
@@ -15,6 +16,8 @@ struct ExecutionView: View {
                 title: readiness?.status?.replacingOccurrences(of: "_", with: " ").capitalized ?? "No readiness yet",
                 summary: readiness?.operatorSummary ?? "Worker readiness appears after OCP starts and advertises local or remote capacity."
             )
+
+            DemoStatusStrip(state: demo, roles: model.deviceRoles)
 
             MissionCard {
                 VStack(alignment: .leading, spacing: 12) {

@@ -127,6 +127,42 @@ public struct AppStatusSnapshot: Decodable, Equatable, Sendable {
     }
 
     public struct Setup: Decodable, Equatable, Sendable {
+        public struct PrimaryPeer: Decodable, Equatable, Sendable {
+            public var peerID: String?
+            public var displayName: String?
+            public var role: String?
+            public var status: String?
+            public var route: String?
+            public var summary: String?
+
+            enum CodingKeys: String, CodingKey {
+                case peerID = "peer_id"
+                case displayName = "display_name"
+                case role
+                case status
+                case route
+                case summary
+            }
+        }
+
+        public struct DeviceRole: Decodable, Equatable, Identifiable, Sendable {
+            public var peerID: String?
+            public var displayName: String?
+            public var role: String?
+            public var status: String?
+            public var summary: String?
+
+            public var id: String { peerID ?? displayName ?? role ?? "device-role" }
+
+            enum CodingKeys: String, CodingKey {
+                case peerID = "peer_id"
+                case displayName = "display_name"
+                case role
+                case status
+                case summary
+            }
+        }
+
         public var status: String?
         public var label: String?
         public var phoneURL: String?
@@ -134,9 +170,14 @@ public struct AppStatusSnapshot: Decodable, Equatable, Sendable {
         public var healthyRouteCount: Int?
         public var routeCount: Int?
         public var latestProofStatus: String?
+        public var recoveryState: String?
+        public var primaryPeer: PrimaryPeer?
+        public var deviceRoles: [DeviceRole]?
         public var blockingIssue: String?
+        public var blockerCode: String?
         public var nextFix: String?
         public var operatorSummary: String?
+        public var story: [String]?
         public var timeline: [TimelineEvent]?
 
         enum CodingKeys: String, CodingKey {
@@ -147,9 +188,14 @@ public struct AppStatusSnapshot: Decodable, Equatable, Sendable {
             case healthyRouteCount = "healthy_route_count"
             case routeCount = "route_count"
             case latestProofStatus = "latest_proof_status"
+            case recoveryState = "recovery_state"
+            case primaryPeer = "primary_peer"
+            case deviceRoles = "device_roles"
             case blockingIssue = "blocking_issue"
+            case blockerCode = "blocker_code"
             case nextFix = "next_fix"
             case operatorSummary = "operator_summary"
+            case story
             case timeline
         }
     }

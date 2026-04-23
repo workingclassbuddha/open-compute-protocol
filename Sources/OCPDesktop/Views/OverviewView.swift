@@ -9,15 +9,32 @@ struct OverviewView: View {
     var openSetup: () -> Void
 
     var body: some View {
+        let demo = model.demoState
         MissionScroll(allowMotion: allowMotion) {
-            PageHeader(
-                eyebrow: "OCP Mission Control",
-                title: "Personal compute fabric",
-                summary: model.setupSummary
+            CinematicOverviewHero(
+                summary: model.setupSummary,
+                setupLabel: model.setupLabel,
+                setupStatus: model.snapshot?.setup?.status ?? "ready",
+                nextFix: model.nextFix,
+                meshScore: model.meshScore,
+                phoneURL: model.phoneURL,
+                isActivating: model.isActivating,
+                recoveryLabel: demo.recoveryLabel,
+                recoverySummary: demo.recoverySummary,
+                proofLabel: demo.proofLabel,
+                proofSummary: demo.proofSummary,
+                primaryPeerLabel: demo.primaryPeerLabel,
+                primaryPeerSummary: demo.primaryPeerSummary,
+                story: demo.story,
+                allowMotion: allowMotion,
+                startMesh: { model.startMesh() },
+                activateMesh: { model.activateMesh() },
+                copyPhoneLink: { model.copyPhoneLink() },
+                openApp: { model.openApp() }
             )
 
             if showGuide {
-                SetupGuideCard(
+                CompactSetupGuideCard(
                     steps: model.setupGuideSteps,
                     allowMotion: allowMotion,
                     startMesh: { model.startMesh() },
@@ -28,28 +45,11 @@ struct OverviewView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
+            DemoStatusStrip(state: demo, roles: model.deviceRoles)
+
             HStack(alignment: .top, spacing: 18) {
                 MissionCard(tint: MissionTheme.signal) {
-                    HStack(alignment: .center, spacing: 24) {
-                        MeshGauge(score: model.meshScore, allowMotion: allowMotion)
-                        VStack(alignment: .leading, spacing: 12) {
-                            StatusPill(text: model.setupLabel, status: model.snapshot?.setup?.status ?? "ready")
-                            Text(model.nextFix)
-                                .font(.system(size: 26, weight: .black, design: .rounded))
-                                .lineLimit(3)
-                            Text(model.statusText)
-                                .foregroundStyle(.secondary)
-                            HStack {
-                                Button("Activate Mesh") { model.activateMesh() }
-                                    .buttonStyle(.borderedProminent)
-                                    .disabled(model.isActivating)
-                                Button("Copy Phone Link") { model.copyPhoneLink() }
-                                    .buttonStyle(.bordered)
-                                Button("Open App") { model.openApp() }
-                                    .buttonStyle(.bordered)
-                            }
-                        }
-                    }
+                    TopologyGraphView(graph: model.topology, compact: true, allowMotion: allowMotion)
                 }
 
                 MissionCard(tint: MissionTheme.mint) {
@@ -66,8 +66,25 @@ struct OverviewView: View {
                 }
             }
 
-            MissionCard(tint: MissionTheme.signal) {
-                TopologyGraphView(graph: model.topology, compact: true, allowMotion: allowMotion)
+            HStack(alignment: .top, spacing: 18) {
+                MissionCard(tint: MissionTheme.copper) {
+                    HStack(alignment: .center, spacing: 20) {
+                        MeshGauge(score: model.meshScore, allowMotion: allowMotion)
+                            .scaleEffect(0.72)
+                            .frame(width: 170, height: 170)
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Mission Status").sectionLabel()
+                            Text(model.nextFix)
+                                .font(.system(size: 25, weight: .black, design: .rounded))
+                                .lineLimit(3)
+                            Text(model.statusText)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(3)
+                        }
+                    }
+                }
+                SovereignPledgeCard()
+                    .frame(maxWidth: 430)
             }
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {

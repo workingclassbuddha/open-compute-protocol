@@ -51,6 +51,14 @@ final class OCPDesktopModel: ObservableObject {
         MissionControlDeriver.topology(from: snapshot)
     }
 
+    var demoState: DemoStripState {
+        MissionControlDeriver.demoState(snapshot: snapshot, mode: currentMode, phoneURL: phoneURL)
+    }
+
+    var deviceRoles: [DeviceRoleSummary] {
+        MissionControlDeriver.deviceRoles(from: snapshot)
+    }
+
     var setupGuideSteps: [SetupGuideStep] {
         MissionControlDeriver.setupGuideSteps(snapshot: snapshot, mode: currentMode, phoneURL: phoneURL)
     }

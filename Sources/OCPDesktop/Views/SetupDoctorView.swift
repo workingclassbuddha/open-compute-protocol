@@ -5,12 +5,16 @@ struct SetupDoctorView: View {
     var allowMotion: Bool
 
     var body: some View {
+        let demo = model.demoState
+
         MissionScroll(allowMotion: allowMotion) {
             PageHeader(
                 eyebrow: "Setup Doctor",
                 title: model.setupLabel,
                 summary: model.setupSummary
             )
+
+            DemoStatusStrip(state: demo, roles: model.deviceRoles)
 
             SetupGuideCard(
                 steps: model.setupGuideSteps,

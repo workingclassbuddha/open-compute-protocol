@@ -7,6 +7,7 @@ struct RoutesView: View {
     var body: some View {
         let health = model.snapshot?.routeHealth
         let routes = health?.routes ?? []
+        let demo = model.demoState
 
         MissionScroll(allowMotion: allowMotion) {
             PageHeader(
@@ -14,6 +15,8 @@ struct RoutesView: View {
                 title: "\(health?.healthy ?? 0) fresh route(s)",
                 summary: health?.operatorSummary ?? "Route health appears after peer discovery and Autonomic Mesh activation."
             )
+
+            DemoStatusStrip(state: demo, roles: model.deviceRoles)
 
             MissionCard(tint: MissionTheme.signal) {
                 TopologyGraphView(graph: model.topology, allowMotion: allowMotion)

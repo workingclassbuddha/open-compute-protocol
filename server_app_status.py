@@ -243,8 +243,288 @@ def _route_fix(routes: dict[str, Any]) -> str:
     return "Press Activate Mesh to probe and repair peer routes."
 
 
+def _route_issue_text(route: dict[str, Any]) -> str:
+    return " ".join(
+        str(route.get(key) or "")
+        for key in ("operator_hint", "operator_summary", "last_error")
+    ).lower()
+
+
+def _route_has_identity_change(route: dict[str, Any]) -> bool:
+    text = _route_issue_text(route)
+    return "different ocp node" in text or ("route reached" in text and "expected" in text)
+
+
+def _route_has_firewall_hint(route: dict[str, Any]) -> bool:
+    text = _route_issue_text(route)
+    return any(
+        token in text
+        for token in (
+            "firewall",
+            "allow python",
+            "allow ocp",
+            "connection refused",
+            "actively refused",
+            "timed out",
+            "timeout",
+        )
+    )
+
+
+def _recovery_state(*, status: str, proof_status: str, last_run: dict[str, Any]) -> str:
+    run_status = str(last_run.get("status") or "").strip().lower()
+    action_kinds = {str(action.get("kind") or "").strip() for action in list(last_run.get("actions") or [])}
+    if run_status == "running" or proof_status in {"planned", "queued", "running", "accepted"}:
+        return "repairing"
+    if status == "needs_attention":
+        return "needs_attention"
+    if {"route_repaired", "peer_synced"} & action_kinds:
+        return "repaired"
+    return "healthy"
+
+
+def _primary_peer(route_health: dict[str, Any], execution_readiness: dict[str, Any], artifact_sync: dict[str, Any]) -> dict[str, Any]:
+    routes = [dict(route or {}) for route in list(route_health.get("routes") or [])]
+    targets = [dict(target or {}) for target in list(execution_readiness.get("targets") or [])]
+    artifact_sources = {
+        str(item.get("source_peer_id") or "").strip()
+        for item in list(artifact_sync.get("items") or [])
+        if str(item.get("source_peer_id") or "").strip()
+    }
+    route_by_peer = {
+        str(route.get("peer_id") or "").strip(): route
+        for route in routes
+        if str(route.get("peer_id") or "").strip()
+    }
+
+    def build(peer_id: str, display_name: str, *, role: str, status: str, summary: str, route: str = "") -> dict[str, Any]:
+        return {
+            "peer_id": peer_id,
+            "display_name": display_name or peer_id,
+            "role": role,
+            "status": status,
+            "route": route,
+            "summary": summary,
+        }
+
+    for target in targets:
+        peer_id = str(target.get("peer_id") or "").strip()
+        if not peer_id or str(target.get("role") or "").strip().lower() == "local":
+            continue
+        route = route_by_peer.get(peer_id, {})
+        freshness = str(route.get("freshness") or target.get("route_freshness") or "").strip().lower()
+        target_status = str(target.get("status") or "").strip().lower()
+        if target_status == "ready" and freshness in {"fresh", "aging", ""}:
+            display_name = str(target.get("display_name") or peer_id).strip()
+            route_url = str(route.get("best_route") or "").strip()
+            summary = f"{display_name} is best for compute right now."
+            if peer_id in artifact_sources:
+                summary = f"{display_name} is ready for compute and holds proof artifacts."
+            return build(peer_id, display_name, role="compute", status=target_status or "ready", summary=summary, route=route_url)
+
+    for route in routes:
+        peer_id = str(route.get("peer_id") or "").strip()
+        freshness = str(route.get("freshness") or "").strip().lower()
+        status = str(route.get("status") or "").strip().lower()
+        if not peer_id or status != "reachable" or freshness not in {"fresh", "aging"}:
+            continue
+        display_name = str(route.get("display_name") or peer_id).strip()
+        role = "artifact_source" if peer_id in artifact_sources else "peer"
+        summary = (
+            f"{display_name} is the current artifact source."
+            if role == "artifact_source"
+            else f"{display_name} is reachable and ready for the demo."
+        )
+        return build(peer_id, display_name, role=role, status=status or "reachable", summary=summary, route=str(route.get("best_route") or "").strip())
+
+    for route in routes[:1]:
+        peer_id = str(route.get("peer_id") or "").strip()
+        if not peer_id:
+            continue
+        display_name = str(route.get("display_name") or peer_id).strip()
+        return build(
+            peer_id,
+            display_name,
+            role="peer",
+            status=str(route.get("status") or "unknown").strip() or "unknown",
+            summary=str(route.get("operator_summary") or f"{display_name} is the clearest peer OCP can see right now.").strip(),
+            route=str(route.get("best_route") or "").strip(),
+        )
+
+    return {}
+
+
+def _device_roles(
+    *,
+    node: dict[str, Any],
+    execution_readiness: dict[str, Any],
+    artifact_sync: dict[str, Any],
+    approvals: dict[str, Any],
+    route_health: dict[str, Any],
+) -> list[dict[str, Any]]:
+    roles: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def append(peer_id: str, display_name: str, role: str, status: str, summary: str) -> None:
+        peer_token = str(peer_id or "").strip()
+        if not peer_token or peer_token in seen:
+            return
+        seen.add(peer_token)
+        roles.append(
+            {
+                "peer_id": peer_token,
+                "display_name": str(display_name or peer_token).strip() or peer_token,
+                "role": role,
+                "status": str(status or "unknown").strip() or "unknown",
+                "summary": str(summary or "").strip(),
+            }
+        )
+
+    local_id = str(node.get("node_id") or "local").strip() or "local"
+    append(
+        local_id,
+        str(node.get("display_name") or "This Mac").strip() or "This Mac",
+        "local_command",
+        "ready",
+        "This Mac is the local command node.",
+    )
+
+    for target in list(execution_readiness.get("targets") or []):
+        target = dict(target or {})
+        peer_id = str(target.get("peer_id") or "").strip()
+        if not peer_id or peer_id == local_id or str(target.get("status") or "").strip().lower() != "ready":
+            continue
+        append(
+            peer_id,
+            str(target.get("display_name") or peer_id).strip(),
+            "compute",
+            "ready",
+            f"{str(target.get('display_name') or peer_id).strip()} is ready for compute work.",
+        )
+
+    for approval in list(approvals.get("items") or []):
+        approval = dict(approval or {})
+        metadata = dict(approval.get("metadata") or {})
+        peer_id = str(metadata.get("candidate_peer_id") or "").strip()
+        if not peer_id:
+            continue
+        append(
+            peer_id,
+            str(metadata.get("candidate_display_name") or peer_id).strip(),
+            "approval_only",
+            str(approval.get("status") or "pending").strip() or "pending",
+            f"{str(metadata.get('candidate_display_name') or peer_id).strip()} is waiting for approval before OCP uses it.",
+        )
+
+    for item in list(artifact_sync.get("items") or []):
+        item = dict(item or {})
+        peer_id = str(item.get("source_peer_id") or "").strip()
+        if not peer_id:
+            continue
+        append(
+            peer_id,
+            peer_id,
+            "artifact_source",
+            str(item.get("verification_status") or "verified").strip() or "verified",
+            f"{peer_id} is holding proof artifacts.",
+        )
+
+    for route in list(route_health.get("routes") or []):
+        route = dict(route or {})
+        peer_id = str(route.get("peer_id") or "").strip()
+        if not peer_id:
+            continue
+        freshness = str(route.get("freshness") or "").strip().lower()
+        status = str(route.get("status") or "").strip().lower()
+        if status == "reachable" and freshness in {"fresh", "aging"}:
+            append(
+                peer_id,
+                str(route.get("display_name") or peer_id).strip(),
+                "route_verified",
+                freshness or "reachable",
+                f"{str(route.get('display_name') or peer_id).strip()} has a proven route.",
+            )
+
+    return roles[:6]
+
+
+def _blocker_code(
+    *,
+    sharing_mode: str,
+    token_configured: bool,
+    peer_count: int,
+    route_count: int,
+    healthy_routes: int,
+    proof_status: str,
+    route_health: dict[str, Any],
+) -> str:
+    routes = [dict(route or {}) for route in list(route_health.get("routes") or [])]
+    if proof_status in {"failed", "needs_attention", "cancelled"}:
+        return "proof_failed"
+    if sharing_mode == "lan" and not token_configured:
+        return "token_missing"
+    if any(_route_has_identity_change(route) for route in routes):
+        return "identity_changed"
+    if any(_route_has_firewall_hint(route) for route in routes):
+        return "firewall_suspected"
+    if route_count and healthy_routes < route_count:
+        return "stale_route"
+    if sharing_mode == "local" and not peer_count:
+        return "local_only"
+    return ""
+
+
+def _setup_story(
+    *,
+    status: str,
+    recovery_state: str,
+    blocker_code: str,
+    next_fix: str,
+    primary_peer: dict[str, Any],
+    latest_proof: dict[str, Any],
+    pending_approvals: int,
+) -> list[str]:
+    proof_status = str(latest_proof.get("status") or "none").strip().lower()
+    lines: list[str] = []
+
+    if status == "strong":
+        lines.append("Mesh is strong.")
+    elif recovery_state == "repairing":
+        lines.append("OCP is repairing routes and proving the mesh.")
+    elif blocker_code == "identity_changed":
+        lines.append("A saved peer route now answers as a different OCP node.")
+    elif blocker_code == "firewall_suspected":
+        lines.append("A peer route looks blocked by firewall or a stopped OCP process.")
+    elif blocker_code == "proof_failed":
+        lines.append("The latest whole-mesh proof did not complete.")
+    elif status == "local_only":
+        lines.append("This node is local only right now.")
+    else:
+        lines.append("Press Activate Mesh to discover, repair, enlist, prove, and explain this mesh.")
+
+    if primary_peer.get("summary"):
+        lines.append(str(primary_peer.get("summary") or "").strip())
+
+    if pending_approvals:
+        lines.append(f"{pending_approvals} approval(s) need attention.")
+    elif proof_status == "completed":
+        lines.append("Whole-mesh proof completed.")
+    elif proof_status in {"planned", "queued", "running", "accepted"}:
+        lines.append("Whole-mesh proof is in flight.")
+
+    if next_fix:
+        lines.append(str(next_fix).strip())
+
+    deduped: list[str] = []
+    for line in lines:
+        if line and line not in deduped:
+            deduped.append(line)
+    return deduped[:4]
+
+
 def _setup_projection(
     *,
+    node: dict[str, Any],
     mesh_quality: dict[str, Any],
     route_health: dict[str, Any],
     connectivity: dict[str, Any],
@@ -252,6 +532,8 @@ def _setup_projection(
     latest_proof: dict[str, Any],
     autonomy: dict[str, Any],
     app_urls: dict[str, Any],
+    execution_readiness: dict[str, Any],
+    artifact_sync: dict[str, Any],
     timeline: list[dict[str, Any]],
 ) -> dict[str, Any]:
     sharing_mode = str(connectivity.get("sharing_mode") or "").strip().lower()
@@ -311,6 +593,34 @@ def _setup_projection(
         label = "Routes ready"
         next_fix = "Press Activate Mesh to run a whole-mesh proof."
 
+    blocker_code = _blocker_code(
+        sharing_mode=sharing_mode,
+        token_configured=token_configured,
+        peer_count=peer_count,
+        route_count=route_count,
+        healthy_routes=healthy_routes,
+        proof_status=proof_status,
+        route_health=route_health,
+    )
+    recovery_state = _recovery_state(status=status, proof_status=proof_status, last_run=last_run)
+    primary_peer = _primary_peer(route_health, execution_readiness, artifact_sync)
+    device_roles = _device_roles(
+        node=node,
+        execution_readiness=execution_readiness,
+        artifact_sync=artifact_sync,
+        approvals=approvals,
+        route_health=route_health,
+    )
+    story = _setup_story(
+        status=status,
+        recovery_state=recovery_state,
+        blocker_code=blocker_code,
+        next_fix=next_fix,
+        primary_peer=primary_peer,
+        latest_proof=latest_proof,
+        pending_approvals=pending_approvals,
+    )
+
     if status == "strong":
         operator_summary = "Mesh is strong. Devices have proven routes and the latest proof completed."
     elif blocking_issue:
@@ -329,9 +639,14 @@ def _setup_projection(
         "healthy_route_count": healthy_routes,
         "route_count": route_count,
         "latest_proof_status": proof_status,
+        "recovery_state": recovery_state,
+        "primary_peer": primary_peer,
+        "device_roles": device_roles,
         "blocking_issue": blocking_issue,
+        "blocker_code": blocker_code,
         "next_fix": next_fix,
         "operator_summary": operator_summary,
+        "story": story,
         "timeline": timeline,
     }
 
@@ -477,6 +792,7 @@ def _protocol_status(manifest: dict[str, Any]) -> dict[str, Any]:
 
 def build_app_status(mesh: SovereignMesh) -> dict[str, Any]:
     manifest = dict(_safe({}, mesh.get_manifest))
+    node = _node_summary(mesh, manifest)
     autonomic = dict(
         _safe(
             {
@@ -513,6 +829,7 @@ def build_app_status(mesh: SovereignMesh) -> dict[str, Any]:
         artifact_sync=artifact_sync,
     )
     setup = _setup_projection(
+        node=node,
         mesh_quality=mesh_quality,
         route_health=route_health,
         connectivity=connectivity,
@@ -520,11 +837,13 @@ def build_app_status(mesh: SovereignMesh) -> dict[str, Any]:
         latest_proof=latest_proof,
         autonomy=autonomic,
         app_urls=app_urls,
+        execution_readiness=execution_readiness,
+        artifact_sync=artifact_sync,
         timeline=timeline,
     )
     return {
         "status": "ok",
-        "node": _node_summary(mesh, manifest),
+        "node": node,
         "app_urls": app_urls,
         "mesh_quality": mesh_quality,
         "protocol": _protocol_status(manifest),

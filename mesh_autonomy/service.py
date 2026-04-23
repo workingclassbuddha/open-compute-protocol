@@ -654,11 +654,20 @@ class MeshAutonomyService:
             repairs.append(probe)
             best_route = str(probe.get("best_route") or "").strip()
             if best_route:
+                self._action(
+                    actions,
+                    "route_repaired",
+                    "ok",
+                    f"Repaired route for {peer_id} at {best_route}.",
+                    peer_id=peer_id,
+                    details={"base_url": best_route, "probe": probe},
+                    request_id=request_id,
+                )
                 try:
                     sync = self.mesh.sync_peer(peer_id, base_url=best_route, limit=20, refresh_manifest=True)
                     self._action(
                         actions,
-                        "route_synced",
+                        "peer_synced",
                         "ok",
                         f"Synced {peer_id} through repaired route.",
                         peer_id=peer_id,
@@ -781,32 +790,78 @@ class MeshAutonomyService:
         proof: dict[str, Any] = {}
         if run_proof:
             try:
+                self._action(
+                    actions,
+                    "proof_started",
+                    "running",
+                    "Starting whole-mesh proof.",
+                    details={"request_id": f"{request_token}-proof"},
+                    request_id=request_token,
+                )
                 proof = self._run_whole_mesh_proof(include_local=True, limit=limit, request_id=f"{request_token}-proof")
                 result["proof"] = proof
                 mission = dict(proof.get("mission") or {})
-                mission_status = str(mission.get("status") or proof.get("status") or "unknown")
-                self._action(
-                    actions,
-                    "proof_completed" if mission_status in {"completed", "planned", "accepted"} else "fix_needed",
-                    "ok" if mission_status in {"completed", "planned", "accepted"} else "warning",
-                    f"Whole-mesh proof launched with status {mission_status}.",
-                    details={"mission_id": mission.get("id"), "mission_status": mission_status},
-                    request_id=request_token,
-                )
-                if repair and self._proof_failed_due_transport(proof):
-                    self._action(actions, "fix_needed", "running", "Proof hit a transport timeout; probing routes once before retry.", request_id=request_token)
-                    result["repairs"] = self._repair_routes(peer_ids, timeout=timeout, request_id=request_token, actions=actions)
-                    proof = self._run_whole_mesh_proof(include_local=True, limit=limit, request_id=f"{request_token}-proof-retry")
-                    result["proof_retry"] = proof
-                    retry_mission = dict(proof.get("mission") or {})
+                mission_status = str(mission.get("status") or proof.get("status") or "unknown").strip().lower()
+                if mission_status in {"completed", "ok"}:
                     self._action(
                         actions,
                         "proof_completed",
                         "ok",
-                        f"Retried whole-mesh proof with status {retry_mission.get('status') or proof.get('status') or 'unknown'}.",
-                        details={"mission_id": retry_mission.get("id"), "mission_status": retry_mission.get("status")},
+                        f"Whole-mesh proof completed with status {mission_status}.",
+                        details={"mission_id": mission.get("id"), "mission_status": mission_status},
                         request_id=request_token,
                     )
+                elif mission_status in {"planned", "queued", "running", "accepted"}:
+                    self._action(
+                        actions,
+                        "proof_started",
+                        "ok",
+                        f"Whole-mesh proof is in flight with status {mission_status}.",
+                        details={"mission_id": mission.get("id"), "mission_status": mission_status},
+                        request_id=request_token,
+                    )
+                else:
+                    self._action(
+                        actions,
+                        "fix_needed",
+                        "warning",
+                        f"Whole-mesh proof needs attention with status {mission_status}.",
+                        details={"mission_id": mission.get("id"), "mission_status": mission_status},
+                        request_id=request_token,
+                    )
+                if repair and self._proof_failed_due_transport(proof):
+                    self._action(actions, "fix_needed", "running", "Proof hit a transport timeout; probing routes once before retry.", request_id=request_token)
+                    result["repairs"] = self._repair_routes(peer_ids, timeout=timeout, request_id=request_token, actions=actions)
+                    self._action(
+                        actions,
+                        "proof_started",
+                        "running",
+                        "Retrying whole-mesh proof after route repair.",
+                        details={"request_id": f"{request_token}-proof-retry"},
+                        request_id=request_token,
+                    )
+                    proof = self._run_whole_mesh_proof(include_local=True, limit=limit, request_id=f"{request_token}-proof-retry")
+                    result["proof_retry"] = proof
+                    retry_mission = dict(proof.get("mission") or {})
+                    retry_status = str(retry_mission.get("status") or proof.get("status") or "unknown").strip().lower()
+                    if retry_status in {"completed", "ok"}:
+                        self._action(
+                            actions,
+                            "proof_completed",
+                            "ok",
+                            f"Retried whole-mesh proof completed with status {retry_status}.",
+                            details={"mission_id": retry_mission.get("id"), "mission_status": retry_status},
+                            request_id=request_token,
+                        )
+                    else:
+                        self._action(
+                            actions,
+                            "fix_needed",
+                            "warning",
+                            f"Retried whole-mesh proof still needs attention with status {retry_status}.",
+                            details={"mission_id": retry_mission.get("id"), "mission_status": retry_status},
+                            request_id=request_token,
+                        )
             except Exception as exc:
                 result["proof_error"] = str(exc)
                 self._action(actions, "fix_needed", "warning", f"Whole-mesh proof needs attention: {exc}", details={"error": str(exc)}, request_id=request_token)
@@ -948,10 +1003,40 @@ class MeshAutonomyService:
                 except Exception as exc:
                     skipped.append({"peer_id": peer_id, "reason": str(exc)})
                     self._action(actions, "fix_needed", "warning", f"Could not enlist {peer_id}: {exc}", peer_id=peer_id, details={"error": str(exc)}, request_id=request_id)
+            elif trust == "partner" and device_class == "full":
+                try:
+                    state = self.mesh.enlist_helper(
+                        peer_id,
+                        mode="on_demand",
+                        role=role,
+                        reason="autonomic_mesh_partner_activation",
+                        source="autonomy",
+                    )
+                    enlisted.append({"peer_id": peer_id, "state": state})
+                    self._action(
+                        actions,
+                        "partner_auto_enlisted",
+                        "ok",
+                        f"Auto-enlisted partner peer {candidate.get('display_name') or peer_id} after route proof succeeded.",
+                        peer_id=peer_id,
+                        details={"role": role},
+                        request_id=request_id,
+                    )
+                except Exception as exc:
+                    skipped.append({"peer_id": peer_id, "reason": str(exc)})
+                    self._action(
+                        actions,
+                        "fix_needed",
+                        "warning",
+                        f"Could not auto-enlist partner peer {peer_id}: {exc}",
+                        peer_id=peer_id,
+                        details={"error": str(exc)},
+                        request_id=request_id,
+                    )
             elif trust == "partner":
                 approval = self.mesh.create_approval_request(
                     title=f"Allow {candidate.get('display_name') or peer_id} to help this mesh?",
-                    summary="Autonomic Mesh found a partner peer that could help, but partner devices need approval before helper enlistment.",
+                    summary="This partner peer is reachable, but OCP still wants approval before auto-using a non-full helper device.",
                     action_type="autonomic.helper.enlist",
                     severity="normal",
                     request_id=f"{request_id}-helper-{peer_id}",
@@ -994,11 +1079,14 @@ class MeshAutonomyService:
         proof_status = str(mission.get("status") or proof.get("status") or "").strip().lower()
         warnings = [action for action in actions if action.get("status") in {"warning", "blocked"}]
         approvals = list(((result.get("helpers") or {}).get("approvals") or []))
+        repaired = any(action.get("kind") in {"route_repaired", "peer_synced"} for action in actions)
         if result.get("proof_error") and healthy == 0:
             return "needs_attention", "Autonomic Mesh found peers, but proof execution still needs attention."
         if approvals:
             return "approval_requested", "Mesh routes are prepared; one or more partner helpers need approval before OCP can use them."
         if route_count and healthy == route_count and (not proof or proof_status in {"completed", "planned", "accepted", "ok"}):
+            if repaired:
+                return "completed", f"Mesh repaired: {healthy} route(s) proven again and the whole-mesh proof recovered."
             return "completed", f"Mesh is strong: {healthy} route(s) proven, helpers evaluated, and whole-mesh proof launched."
         if healthy:
             return "partial", f"Mesh is partly healthy: {healthy} route(s) work, but {len(warnings)} item(s) need attention."

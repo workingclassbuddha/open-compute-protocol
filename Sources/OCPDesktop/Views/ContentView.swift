@@ -76,6 +76,8 @@ struct ContentView: View {
                 showGuide = true
             }
         }
+        .preferredColorScheme(.dark)
+        .tint(MissionTheme.mint)
     }
 
     @ViewBuilder

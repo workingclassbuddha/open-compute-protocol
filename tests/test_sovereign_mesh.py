@@ -5162,12 +5162,16 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(probe.content_type, "text/html; charset=utf-8")
         self.assertIn("OCP App", probe.payload)
         self.assertIn("One app for the mesh.", probe.payload)
+        self.assertIn("Mission Control on your phone", probe.payload)
         self.assertIn("Setup Details", probe.payload)
         self.assertIn("Advanced Control", probe.payload)
         self.assertIn("Activate Mesh", probe.payload)
         self.assertIn("Run on Best Device", probe.payload)
         self.assertIn("Replicate Proof Artifact", probe.payload)
         self.assertIn("Proof timeline", probe.payload)
+        self.assertIn("data-story-lines", probe.payload)
+        self.assertIn("data-device-roles", probe.payload)
+        self.assertIn("data-app-recovery-state", probe.payload)
         self.assertIn("/easy", probe.payload)
         self.assertIn("/control", probe.payload)
         self.assertIn("/mesh/contract", probe.payload)
@@ -5195,6 +5199,7 @@ class SovereignMeshTests(unittest.TestCase):
 
     def test_app_status_setup_projection_surfaces_foolproof_states(self):
         base = {
+            "node": {"node_id": "alpha-node", "display_name": "Alpha"},
             "mesh_quality": {"peer_count": 0, "route_count": 0, "healthy_routes": 0},
             "route_health": {"status": "ok", "count": 0, "healthy": 0, "routes": []},
             "connectivity": {"sharing_mode": "local"},
@@ -5202,18 +5207,24 @@ class SovereignMeshTests(unittest.TestCase):
             "latest_proof": {"status": "none"},
             "autonomy": {"last_run": {}},
             "app_urls": {"phone_url": "http://127.0.0.1:8421/app"},
+            "execution_readiness": {"targets": []},
+            "artifact_sync": {"items": [], "verified_count": 0},
             "timeline": [],
         }
 
         with mock.patch.dict(os.environ, {"OCP_OPERATOR_TOKEN": "", "OCP_CONTROL_TOKEN": ""}, clear=False):
             local_only = server_app_status._setup_projection(**base)
             self.assertEqual(local_only["status"], "local_only")
+            self.assertEqual(local_only["blocker_code"], "local_only")
+            self.assertEqual(local_only["recovery_state"], "healthy")
+            self.assertIn("local only", " ".join(local_only["story"]).lower())
             self.assertIn("Start Mesh Mode", local_only["next_fix"])
 
             lan_missing_token = server_app_status._setup_projection(
                 **{**base, "connectivity": {"sharing_mode": "lan"}}
             )
             self.assertEqual(lan_missing_token["status"], "needs_attention")
+            self.assertEqual(lan_missing_token["blocker_code"], "token_missing")
             self.assertIn("operator token", lan_missing_token["blocking_issue"])
 
         route_needs_repair = {
@@ -5223,25 +5234,109 @@ class SovereignMeshTests(unittest.TestCase):
                 "status": "ok",
                 "count": 1,
                 "healthy": 0,
-                "routes": [{"status": "reachable", "freshness": "stale", "operator_summary": "Beta route is stale."}],
+                "routes": [
+                    {
+                        "peer_id": "beta-node",
+                        "display_name": "Beta",
+                        "status": "reachable",
+                        "freshness": "stale",
+                        "operator_summary": "Beta route is stale.",
+                    }
+                ],
             },
             "connectivity": {"sharing_mode": "lan"},
         }
         with mock.patch.dict(os.environ, {"OCP_OPERATOR_TOKEN": "token"}, clear=False):
             repair = server_app_status._setup_projection(**route_needs_repair)
             self.assertEqual(repair["status"], "needs_attention")
+            self.assertEqual(repair["blocker_code"], "stale_route")
+            self.assertEqual(repair["primary_peer"]["peer_id"], "beta-node")
             self.assertIn("stale", repair["next_fix"])
+
+            repairing = server_app_status._setup_projection(
+                **{
+                    **route_needs_repair,
+                    "latest_proof": {"status": "running"},
+                    "autonomy": {"last_run": {"status": "running"}},
+                }
+            )
+            self.assertEqual(repairing["status"], "proving")
+            self.assertEqual(repairing["recovery_state"], "repairing")
+            self.assertIn("repairing routes", " ".join(repairing["story"]).lower())
+
+            repaired = server_app_status._setup_projection(
+                **{
+                    **route_needs_repair,
+                    "mesh_quality": {"peer_count": 1, "route_count": 1, "healthy_routes": 1},
+                    "route_health": {
+                        "status": "ok",
+                        "count": 1,
+                        "healthy": 1,
+                        "routes": [
+                            {
+                                "peer_id": "beta-node",
+                                "display_name": "Beta",
+                                "status": "reachable",
+                                "freshness": "fresh",
+                                "best_route": "http://beta:8421",
+                                "operator_summary": "Beta is reachable again.",
+                            }
+                        ],
+                    },
+                    "autonomy": {"last_run": {"actions": [{"kind": "route_repaired"}, {"kind": "peer_synced"}]}},
+                }
+            )
+            self.assertEqual(repaired["status"], "ready")
+            self.assertEqual(repaired["recovery_state"], "repaired")
+            self.assertEqual(repaired["primary_peer"]["peer_id"], "beta-node")
+
+            identity_changed = server_app_status._setup_projection(
+                **{
+                    **route_needs_repair,
+                    "route_health": {
+                        "status": "ok",
+                        "count": 1,
+                        "healthy": 0,
+                        "routes": [
+                            {
+                                "peer_id": "beta-node",
+                                "display_name": "Beta",
+                                "status": "unreachable",
+                                "freshness": "failed",
+                                "operator_summary": "route reached gamma-node, expected beta-node",
+                            }
+                        ],
+                    },
+                }
+            )
+            self.assertEqual(identity_changed["blocker_code"], "identity_changed")
+            self.assertIn("different ocp node", " ".join(identity_changed["story"]).lower())
 
             strong = server_app_status._setup_projection(
                 **{
                     **route_needs_repair,
                     "mesh_quality": {"peer_count": 1, "route_count": 1, "healthy_routes": 1},
-                    "route_health": {"status": "ok", "count": 1, "healthy": 1, "routes": []},
+                    "route_health": {
+                        "status": "ok",
+                        "count": 1,
+                        "healthy": 1,
+                        "routes": [
+                            {
+                                "peer_id": "beta-node",
+                                "display_name": "Beta",
+                                "status": "reachable",
+                                "freshness": "fresh",
+                                "best_route": "http://beta:8421",
+                            }
+                        ],
+                    },
                     "latest_proof": {"status": "completed"},
                 }
             )
             self.assertEqual(strong["status"], "strong")
+            self.assertEqual(strong["recovery_state"], "healthy")
             self.assertEqual(strong["primary_action"], "activate_mesh")
+            self.assertIn("mesh is strong", " ".join(strong["story"]).lower())
 
     def test_raw_mesh_post_routes_require_operator_auth_off_loopback(self):
         alpha = self.make_stack("alpha")
@@ -5671,7 +5766,7 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertFalse(result["helpers"]["enlisted"])
         self.assertTrue(any(item["reason"] == "route_not_usable" for item in result["helpers"]["skipped"]))
 
-    def test_autonomic_partner_helper_requires_approval_and_rejection_learns_deny(self):
+    def test_autonomic_partner_helper_auto_enlists_after_route_proof(self):
         alpha = self.make_stack("alpha")
         beta = self.make_stack("beta")
         _, beta_base_url = self.serve_mesh(beta)
@@ -5690,18 +5785,11 @@ class SovereignMeshTests(unittest.TestCase):
         finally:
             alpha.mesh.suggest_local_scan_urls = original
 
-        self.assertEqual(result["status"], "approval_requested")
-        approval = result["approvals"][0]["approval"]
-        rejected = alpha.mesh.resolve_approval(
-            approval["id"],
-            decision="rejected",
-            operator_peer_id="alpha-node",
-            operator_agent_id="test-ui",
-            reason="test reject",
-        )
-        self.assertEqual(rejected["status"], "rejected")
-        preferences = alpha.mesh.list_offload_preferences(peer_id="beta-node", workload_class="connectivity_test")
-        self.assertEqual(preferences["preferences"][0]["preference"], "deny")
+        self.assertIn(result["status"], {"completed", "partial"})
+        self.assertFalse(result["approvals"])
+        self.assertTrue(result["helpers"]["enlisted"])
+        self.assertEqual(result["helpers"]["enlisted"][0]["peer_id"], "beta-node")
+        self.assertTrue(any(action["kind"] == "partner_auto_enlisted" for action in result["actions"]))
 
     def test_autonomic_route_repair_retries_transport_timeout_once(self):
         alpha = self.make_stack("alpha")
@@ -6855,6 +6943,7 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(content_type, "text/html; charset=utf-8")
         self.assertIn("OCP App", markup)
         self.assertIn("One app for the mesh.", markup)
+        self.assertIn("Mission Control on your phone", markup)
         self.assertIn("OCP Today", markup)
         self.assertIn("Activate Mesh", markup)
         self.assertIn("Run on Best Device", markup)
@@ -6862,6 +6951,9 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("data-proof-timeline", markup)
         self.assertIn("Setup Doctor", markup)
         self.assertIn("Phone Link + QR", markup)
+        self.assertIn("data-story-lines", markup)
+        self.assertIn("data-device-roles", markup)
+        self.assertIn("data-app-recovery-state", markup)
         self.assertIn("/mesh/app/status", markup)
         self.assertIn("ocp_operator_token", markup)
         self.assertIn("X-OCP-Operator-Token", markup)
@@ -6892,6 +6984,11 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("next_actions", app_status)
         self.assertEqual(app_status["setup"]["primary_action"], "activate_mesh")
         self.assertIn(app_status["setup"]["status"], {"ready", "local_only", "needs_attention", "proving", "strong"})
+        self.assertIn(app_status["setup"]["recovery_state"], {"healthy", "repairing", "repaired", "needs_attention"})
+        self.assertIn("primary_peer", app_status["setup"])
+        self.assertIn("device_roles", app_status["setup"])
+        self.assertIn("blocker_code", app_status["setup"])
+        self.assertIn("story", app_status["setup"])
         self.assertNotIn("ocp_operator_token", app_status["setup"]["phone_url"])
         self.assertIn("/app", app_status["app_urls"]["app_url"])
 

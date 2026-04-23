@@ -80,7 +80,36 @@ import Foundation
         "healthy_route_count": 1,
         "route_count": 2,
         "latest_proof_status": "failed",
+        "recovery_state": "needs_attention",
+        "primary_peer": {
+          "peer_id": "beta-node",
+          "display_name": "Beta Laptop",
+          "role": "compute",
+          "status": "ready",
+          "summary": "Beta Laptop is best for compute right now."
+        },
+        "device_roles": [
+          {
+            "peer_id": "alpha-node",
+            "display_name": "Alpha",
+            "role": "local_command",
+            "status": "ready",
+            "summary": "This Mac is the local command node."
+          },
+          {
+            "peer_id": "beta-node",
+            "display_name": "Beta Laptop",
+            "role": "compute",
+            "status": "ready",
+            "summary": "Beta Laptop is ready for compute work."
+          }
+        ],
+        "blocker_code": "proof_failed",
         "next_fix": "Press Activate Mesh again.",
+        "story": [
+          "The latest whole-mesh proof did not complete.",
+          "Beta Laptop is best for compute right now."
+        ],
         "timeline": [{"kind": "route_verified", "status": "ok", "summary": "Beta is reachable."}]
       },
       "route_health": {"count": 2, "healthy": 1, "routes": [{"peer_id": "beta-node", "status": "reachable", "freshness": "fresh"}]},
@@ -97,6 +126,11 @@ import Foundation
 
     #expect(snapshot.node?.nodeID == "alpha-node")
     #expect(snapshot.setup?.timeline?.first?.kind == "route_verified")
+    #expect(snapshot.setup?.recoveryState == "needs_attention")
+    #expect(snapshot.setup?.primaryPeer?.peerID == "beta-node")
+    #expect(snapshot.setup?.deviceRoles?.count == 2)
+    #expect(snapshot.setup?.blockerCode == "proof_failed")
+    #expect(snapshot.setup?.story?.first == "The latest whole-mesh proof did not complete.")
     #expect(snapshot.routeHealth?.routes?.first?.peerID == "beta-node")
     #expect(snapshot.executionReadiness?.targets?.first?.status == "ready")
     #expect(snapshot.artifactSync?.verifiedCount == 1)
@@ -217,6 +251,65 @@ import Foundation
     #expect(graph.edges.contains { $0.source == "stale-node" && $0.target == "alpha-node" && $0.label == "artifact" })
 }
 
+@Test func demoStateAndDeviceRolesUseSetupProjectionWhenAvailable() throws {
+    let data = """
+    {
+      "status": "ok",
+      "node": {"node_id": "alpha-node", "display_name": "Alpha"},
+      "setup": {
+        "status": "proving",
+        "label": "Proof running",
+        "phone_url": "http://192.168.1.4:8421/app",
+        "latest_proof_status": "running",
+        "recovery_state": "repairing",
+        "blocker_code": "",
+        "next_fix": "Keep this page open while OCP finishes route checks and proof execution.",
+        "story": [
+          "OCP is repairing routes and proving the mesh.",
+          "Beta Laptop is best for compute right now."
+        ],
+        "primary_peer": {
+          "peer_id": "beta-node",
+          "display_name": "Beta Laptop",
+          "role": "compute",
+          "status": "ready",
+          "summary": "Beta Laptop is best for compute right now."
+        },
+        "device_roles": [
+          {
+            "peer_id": "alpha-node",
+            "display_name": "Alpha",
+            "role": "local_command",
+            "status": "ready",
+            "summary": "This Mac is the local command node."
+          },
+          {
+            "peer_id": "beta-node",
+            "display_name": "Beta Laptop",
+            "role": "compute",
+            "status": "ready",
+            "summary": "Beta Laptop is ready for compute work."
+          }
+        ]
+      },
+      "latest_proof": {"status": "running", "summary": "Whole-mesh proof is in flight."}
+    }
+    """.data(using: .utf8)!
+
+    let snapshot = try JSONDecoder().decode(AppStatusSnapshot.self, from: data)
+    let demo = MissionControlDeriver.demoState(snapshot: snapshot, mode: .mesh, phoneURL: "http://192.168.1.4:8421/app")
+    let roles = MissionControlDeriver.deviceRoles(from: snapshot)
+
+    #expect(demo.phoneLabel == "Phone link ready")
+    #expect(demo.recoveryLabel == "Repairing")
+    #expect(demo.primaryPeerLabel == "Beta Laptop")
+    #expect(demo.proofLabel == "Running")
+    #expect(demo.story.first == "OCP is repairing routes and proving the mesh.")
+    #expect(roles.count == 2)
+    #expect(roles.first?.role == "local_command")
+    #expect(roles.last?.role == "compute")
+}
+
 @Test func setupGuideStepsTrackLocalReadyProofFailureAndStrongStates() throws {
     let localSteps = MissionControlDeriver.setupGuideSteps(snapshot: nil, mode: .local, phoneURL: "Start Mesh Mode")
     #expect(localSteps[0].status == "active")
@@ -235,6 +328,22 @@ import Foundation
     #expect(readySteps[1].status == "complete")
     #expect(readySteps[2].status == "complete")
     #expect(readySteps[3].status == "active")
+
+    let repairingData = """
+    {
+      "status": "ok",
+      "setup": {
+        "status": "proving",
+        "route_count": 1,
+        "healthy_route_count": 1,
+        "latest_proof_status": "running",
+        "recovery_state": "repairing"
+      }
+    }
+    """.data(using: .utf8)!
+    let repairing = try JSONDecoder().decode(AppStatusSnapshot.self, from: repairingData)
+    let repairingSteps = MissionControlDeriver.setupGuideSteps(snapshot: repairing, mode: .mesh, phoneURL: "http://192.168.1.4:8421/app")
+    #expect(repairingSteps[3].status == "active")
 
     let failedData = """
     {"status": "ok", "setup": {"status": "needs_attention", "route_count": 1, "healthy_route_count": 0, "latest_proof_status": "failed"}}
