@@ -110,9 +110,23 @@ class MeshExecutionService:
         execution = dict(spec.get("execution") or {})
         runtime_environment = dict(spec.get("runtime_environment") or {})
         env_policy = dict(runtime_environment.get("env_policy") or {})
-        inherit_host_env = bool(env_policy.get("inherit_host_env", True))
+        inherit_host_env = bool(env_policy.get("inherit_host_env", False))
         allow_env_override = bool(env_policy.get("allow_env_override", True))
-        env: dict[str, str] = dict(os.environ) if inherit_host_env else {}
+        raw_inherit_allowlist = env_policy.get("inherit_env_allowlist") or []
+        if isinstance(raw_inherit_allowlist, str):
+            raw_inherit_allowlist = [item.strip() for item in raw_inherit_allowlist.split(",")]
+        inherit_allowlist = [
+            self._normalize_env_var_name(item)
+            for item in list(raw_inherit_allowlist or [])
+            if str(item or "").strip()
+        ]
+        env: dict[str, str] = {}
+        if inherit_host_env:
+            env = {
+                key: str(os.environ[key])
+                for key in inherit_allowlist
+                if key in os.environ
+            }
         delivery_records: list[dict] = []
         for key, value in dict(execution.get("env") or {}).items():
             env_name = self._normalize_env_var_name(key)
@@ -139,6 +153,35 @@ class MeshExecutionService:
             env[normalized_name] = str(resolved_value)
             delivery_records.append(delivery_record)
         return env, delivery_records
+
+    def _redact_env_assignment(self, assignment: Any) -> str:
+        key, separator, _ = str(assignment or "").partition("=")
+        if separator:
+            return f"{key}=<redacted>"
+        return "<redacted>"
+
+    def _redact_env_vector(self, argv: list[str], *, flags: set[str]) -> list[str]:
+        redacted: list[str] = []
+        redact_next = False
+        for token in argv:
+            if redact_next:
+                redacted.append(self._redact_env_assignment(token))
+                redact_next = False
+                continue
+            sample = str(token)
+            matched_inline = False
+            for flag in flags:
+                prefix = f"{flag}="
+                if sample.startswith(prefix):
+                    redacted.append(f"{prefix}{self._redact_env_assignment(sample[len(prefix):])}")
+                    matched_inline = True
+                    break
+            if matched_inline:
+                continue
+            redacted.append(sample)
+            if sample in flags:
+                redact_next = True
+        return redacted
 
     def container_runtime_paths(self, runtime_environment: dict, execution: dict) -> dict[str, Any]:
         filesystem = dict(runtime_environment.get("filesystem") or {})
@@ -624,7 +667,7 @@ class MeshExecutionService:
                     "image": image,
                     "command": [str(part) for part in (execution.get("command") or [])],
                     "args": [str(part) for part in (execution.get("args") or [])],
-                    "docker_argv": docker_argv,
+                    "docker_argv": self._redact_env_vector(docker_argv, flags={"-e", "--env"}),
                     "container_name": container_name,
                     "network_mode": network_mode,
                     "mounted_workspace": bool(path_info["mount_workspace"]),
@@ -687,7 +730,7 @@ class MeshExecutionService:
                     "component_path": str(component_path),
                     "entrypoint": entrypoint,
                     "args": [str(part) for part in (execution.get("args") or [])],
-                    "wasm_argv": wasm_argv,
+                    "wasm_argv": self._redact_env_vector(wasm_argv, flags={"--env"}),
                     "network_mode": network_mode,
                     "preopened_dir": "" if str(filesystem.get("profile") or "workspace").strip().lower() == "isolated" else str(cwd_path),
                     "cwd": str(cwd_path),

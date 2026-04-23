@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import hmac
+import ipaddress
+import os
 from typing import Any
 
 from server_app import build_app_manifest as _build_app_manifest, build_app_page as _build_app_page
+from server_app_status import build_app_status as _build_app_status
 from server_artifacts import (
     get_artifact_from_path as _get_artifact_from_path_impl,
     list_artifacts as _list_artifacts_impl,
@@ -53,7 +57,9 @@ from server_missions import (
 )
 from server_ops import (
     ack_notification_from_path as _ack_notification_from_path_impl,
+    activate_autonomic_mesh as _activate_autonomic_mesh_impl,
     audit_treaty_requirements as _audit_treaty_requirements_impl,
+    autonomy_status as _autonomy_status_impl,
     auto_seek_help as _auto_seek_help_impl,
     claim_worker_job_from_path as _claim_worker_job_from_path_impl,
     create_approval_request as _create_approval_request_impl,
@@ -74,6 +80,7 @@ from server_ops import (
     list_workers as _list_workers_impl,
     mesh_pressure as _mesh_pressure_impl,
     plan_helper_enlistment as _plan_helper_enlistment_impl,
+    probe_routes as _probe_routes_impl,
     poll_worker_from_path as _poll_worker_from_path_impl,
     propose_treaty as _propose_treaty_impl,
     publish_notification as _publish_notification_impl,
@@ -83,11 +90,16 @@ from server_ops import (
     replay_queue_message as _replay_queue_message_impl,
     resolve_approval_from_path as _resolve_approval_from_path_impl,
     retire_helper as _retire_helper_impl,
+    routes_health as _routes_health_impl,
     run_autonomous_offload as _run_autonomous_offload_impl,
     set_offload_preference as _set_offload_preference_impl,
     set_queue_ack_deadline as _set_queue_ack_deadline_impl,
 )
-from server_routes import dispatch_get as _dispatch_get_request_impl, dispatch_post as _dispatch_post_request_impl
+from server_routes import (
+    dispatch_get as _dispatch_get_request_impl,
+    dispatch_post as _dispatch_post_request_impl,
+    resolve_post_route as _resolve_post_route,
+)
 from server_runtime import (
     accept_handshake as _accept_handshake_impl,
     accept_handoff as _accept_handoff_impl,
@@ -112,6 +124,92 @@ def _path_token(path: str, prefix: str, suffix: str = "") -> str:
     return token[len(prefix) :].strip("/")
 
 
+_SIGNED_PEER_POST_HANDLERS = {
+    "_handle_mesh_handshake",
+    "_handle_mesh_job_submit",
+    "_handle_mesh_artifact_publish",
+    "_handle_mesh_handoff",
+}
+
+
+def _configured_operator_token() -> str:
+    return (
+        os.environ.get("OCP_OPERATOR_TOKEN")
+        or os.environ.get("OCP_CONTROL_TOKEN")
+        or ""
+    ).strip()
+
+
+def _extract_bearer_token(value: str) -> str:
+    sample = str(value or "").strip()
+    if sample.lower().startswith("bearer "):
+        return sample[7:].strip()
+    return sample
+
+
+def _request_operator_token(headers) -> str:
+    if headers is None:
+        return ""
+    for key in ("X-OCP-Operator-Token", "X-OCP-Control-Token", "Authorization"):
+        token = _extract_bearer_token(headers.get(key, ""))
+        if token:
+            return token
+    return ""
+
+
+def _client_host(handler) -> str:
+    client_address = getattr(handler, "client_address", None)
+    if isinstance(client_address, tuple) and client_address:
+        return str(client_address[0] or "").strip()
+    return ""
+
+
+def _is_loopback_client(host: str) -> bool:
+    token = str(host or "").strip().lower()
+    if not token:
+        return True
+    if token == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(token).is_loopback
+    except ValueError:
+        return False
+
+
+def _operator_auth_required(path: str) -> bool:
+    spec = _resolve_post_route(path)
+    if spec is None:
+        return False
+    return spec.handler_name not in _SIGNED_PEER_POST_HANDLERS
+
+
+def _operator_authorized(handler) -> bool:
+    configured = _configured_operator_token()
+    presented = _request_operator_token(getattr(handler, "headers", None))
+    if configured:
+        return bool(presented and hmac.compare_digest(presented, configured))
+    return _is_loopback_client(_client_host(handler))
+
+
+def _operator_auth_failure(method: str, path: str, handler) -> dict[str, Any]:
+    return {
+        "error": "operator authorization required",
+        "method": str(method or "").strip().upper(),
+        "path": path,
+        "client_address": _client_host(handler),
+        "detail": (
+            "set OCP_OPERATOR_TOKEN and send X-OCP-Operator-Token or Authorization Bearer credentials"
+            if _configured_operator_token()
+            else "raw mesh mutation routes are limited to loopback unless OCP_OPERATOR_TOKEN is configured"
+        ),
+    }
+
+
+def _query_bool(params: dict[str, list[str]], key: str, *, default: bool) -> bool:
+    raw = params.get(key, ["1" if default else "0"])[0]
+    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
+
+
 class OCPRouteHandlerMixin:
     def _handle_control_page(self):
         self._send_html(_build_control_page(self._mesh()))
@@ -124,6 +222,9 @@ class OCPRouteHandlerMixin:
 
     def _handle_app_manifest(self):
         self._send_manifest_json(_build_app_manifest(self._mesh()))
+
+    def _handle_mesh_app_status(self):
+        self._send_json(_build_app_status(self._mesh()))
 
     def _handle_control_stream(self, params):
         _handle_control_stream_impl(self, self._mesh(), params)
@@ -163,6 +264,18 @@ class OCPRouteHandlerMixin:
 
     def _handle_mesh_connectivity_diagnostics(self):
         self._send_json(_connectivity_diagnostics_impl(self._mesh(), limit=24))
+
+    def _handle_mesh_autonomy_status(self):
+        self._send_json(_autonomy_status_impl(self._mesh()))
+
+    def _handle_mesh_autonomy_activate(self, data):
+        self._send_json(_activate_autonomic_mesh_impl(self._mesh(), data))
+
+    def _handle_mesh_routes_health(self):
+        self._send_json(_routes_health_impl(self._mesh(), limit=50))
+
+    def _handle_mesh_routes_probe(self, data):
+        self._send_json(_probe_routes_impl(self._mesh(), data))
 
     def _handle_mesh_peers_connect(self, data):
         self._send_json(_connect_peer_impl(self._mesh(), data))
@@ -405,10 +518,11 @@ class OCPRouteHandlerMixin:
         )
 
     def _handle_mesh_queue_events(self, params):
+        cursor = params.get("since", params.get("since_seq", ["0"]))[0]
         self._send_json(
             _list_queue_events_impl(
                 self._mesh(),
-                since_seq=int(params.get("since", ["0"])[0]),
+                since_seq=int(cursor),
                 limit=int(params.get("limit", ["50"])[0]),
                 queue_message_id=params.get("queue_message_id", [""])[0],
                 job_id=params.get("job_id", [""])[0],
@@ -499,9 +613,16 @@ class OCPRouteHandlerMixin:
         self._send_json(_accept_handoff_impl(self._mesh(), data))
 
     def _dispatch_get_request(self, path: str, params: dict[str, list[str]]) -> bool:
+        if path.startswith("/mesh/artifacts/") and _query_bool(params, "include_content", default=True):
+            if not _operator_authorized(self) and not self._artifact_content_is_public(path):
+                self._send_json(_operator_auth_failure("GET", path, self), 401)
+                return True
         return _dispatch_get_request_impl(self, path, params)
 
     def _dispatch_post_request(self, path: str, data: dict[str, Any]) -> bool:
+        if _operator_auth_required(path) and not _operator_authorized(self):
+            self._send_json(_operator_auth_failure("POST", path, self), 401)
+            return True
         validation = _validate_route_request("POST", path, data)
         if validation.get("status") == "invalid":
             self._send_json(
@@ -513,6 +634,13 @@ class OCPRouteHandlerMixin:
             )
             return True
         return _dispatch_post_request_impl(self, path, data)
+
+    def _artifact_content_is_public(self, path: str) -> bool:
+        try:
+            artifact = self._mesh().get_artifact(_path_token(path, "/mesh/artifacts/"), include_content=False)
+            return self._mesh()._policy_allows_peer(dict(artifact.get("policy") or {}), None)
+        except Exception:
+            return False
 
 
 __all__ = ["OCPRouteHandlerMixin"]

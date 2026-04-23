@@ -9,6 +9,7 @@ import base64
 import dataclasses
 import datetime as dt
 import hashlib
+import hmac
 import ipaddress
 import json
 import logging
@@ -27,6 +28,7 @@ from urllib.parse import urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 from mesh_artifacts import MeshArtifactService
+from mesh_autonomy import MeshAutonomyService
 from mesh_execution import MeshExecutionService
 from mesh_governance import MeshGovernanceService
 from mesh_helpers import MeshHelperService
@@ -53,7 +55,7 @@ from mesh_protocol import (
 from mesh_scheduler import MeshSchedulerService
 from mesh_state import MeshStateService, initialize_mesh_schema
 
-from .crypto import SIGNATURE_SCHEME, generate_keypair, sign_message, verify_message
+from .crypto import SIGNATURE_SCHEME, generate_keypair, public_key_from_private, sign_message, verify_message
 
 logger = logging.getLogger(__name__)
 
@@ -1051,6 +1053,13 @@ class MeshPeerClient:
         self.base_url = (base_url or "").rstrip("/")
         self.timeout = float(timeout)
 
+    def _operator_token(self) -> str:
+        return (
+            os.environ.get("OCP_OPERATOR_TOKEN")
+            or os.environ.get("OCP_CONTROL_TOKEN")
+            or ""
+        ).strip()
+
     def _request_json(self, method: str, path: str, payload: Optional[dict] = None, params: Optional[dict] = None) -> dict:
         url = self.base_url + path
         if params:
@@ -1059,6 +1068,9 @@ class MeshPeerClient:
                 url += ("&" if "?" in url else "?") + query
         data = None
         headers = {"Accept": "application/json"}
+        operator_token = self._operator_token()
+        if operator_token:
+            headers["X-OCP-Operator-Token"] = operator_token
         if payload is not None:
             data = json.dumps(payload).encode("utf-8")
             headers["Content-Type"] = "application/json"
@@ -1095,6 +1107,18 @@ class MeshPeerClient:
 
     def connectivity_diagnostics(self) -> dict:
         return self._request_json("GET", "/mesh/connectivity/diagnostics")
+
+    def routes_health(self) -> dict:
+        return self._request_json("GET", "/mesh/routes/health")
+
+    def probe_routes(self, payload: Optional[dict] = None) -> dict:
+        return self._request_json("POST", "/mesh/routes/probe", payload=payload or {})
+
+    def autonomic_status(self) -> dict:
+        return self._request_json("GET", "/mesh/autonomy/status")
+
+    def activate_autonomic_mesh(self, payload: Optional[dict] = None) -> dict:
+        return self._request_json("POST", "/mesh/autonomy/activate", payload=payload or {})
 
     def connect_peer(self, payload: dict) -> dict:
         return self._request_json("POST", "/mesh/peers/connect", payload=payload)
@@ -1773,6 +1797,14 @@ class SovereignMesh:
             sha256_bytes=_sha256_bytes,
             utcnow=_utcnow,
         )
+        self.autonomy = MeshAutonomyService(
+            self,
+            peer_client_type=MeshPeerClient,
+            loads_json=_loads_json,
+            normalize_base_url=_normalize_base_url,
+            normalize_trust_tier=_normalize_trust_tier,
+            utcnow=_utcnow,
+        )
 
     def _resolve_docker_enabled(self, explicit: Optional[bool]) -> bool:
         if explicit is not None:
@@ -1811,19 +1843,39 @@ class SovereignMesh:
         explicit_display_name: Optional[str] = None,
     ) -> tuple[str, str, str, str]:
         path = self.mesh_root / "identity.json"
+        stored_identity: dict[str, Any] = {}
+        try:
+            self.mesh_root.chmod(0o700)
+        except OSError:
+            pass
         if path.exists():
-            data = _loads_json(path.read_text(encoding="utf-8"), {})
-            private_key = (data.get("private_key") or "").strip()
-            public_key = (data.get("public_key") or "").strip()
-            node_id = (explicit_node_id or data.get("node_id") or "").strip()
-            display_name = (explicit_display_name or data.get("display_name") or "").strip()
-            if private_key and public_key and node_id:
+            stored_identity = _loads_json(path.read_text(encoding="utf-8"), {})
+            private_key = (stored_identity.get("private_key") or "").strip()
+            public_key = (stored_identity.get("public_key") or "").strip()
+            node_id = (explicit_node_id or stored_identity.get("node_id") or "").strip()
+            display_name = (explicit_display_name or stored_identity.get("display_name") or "").strip()
+            signature_scheme = (stored_identity.get("signature_scheme") or "").strip()
+            try:
+                derived_public_key = public_key_from_private(private_key) if private_key else ""
+            except Exception:
+                derived_public_key = ""
+            if (
+                private_key
+                and public_key
+                and node_id
+                and signature_scheme == SIGNATURE_SCHEME
+                and hmac.compare_digest(derived_public_key, public_key)
+            ):
+                try:
+                    path.chmod(0o600)
+                except OSError:
+                    pass
                 return node_id, display_name or node_id, private_key, public_key
 
         private_key, public_key = generate_keypair()
         hostname = socket.gethostname().split(".")[0] or "organism"
-        node_id = (explicit_node_id or f"{hostname}-{uuid.uuid4().hex[:8]}").strip()
-        display_name = (explicit_display_name or f"{hostname} organism").strip()
+        node_id = (explicit_node_id or stored_identity.get("node_id") or f"{hostname}-{uuid.uuid4().hex[:8]}").strip()
+        display_name = (explicit_display_name or stored_identity.get("display_name") or f"{hostname} organism").strip()
         payload = {
             "node_id": node_id,
             "display_name": display_name,
@@ -1833,6 +1885,10 @@ class SovereignMesh:
             "created_at": _utcnow(),
         }
         path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
         return node_id, display_name, private_key, public_key
 
     def _load_or_create_device_profile(self, *, explicit_device_profile: Optional[dict] = None) -> dict:
@@ -2648,6 +2704,52 @@ class SovereignMesh:
             "scan_urls": self.suggest_local_scan_urls(port=resolved_port, limit=limit),
             "recent_errors": recent_errors,
         }
+
+    def routes_health(self, *, limit: int = 50) -> dict:
+        return self.autonomy.routes_health(limit=limit)
+
+    def probe_routes(
+        self,
+        *,
+        peer_id: str = "",
+        base_url: str = "",
+        timeout: float = 2.0,
+        limit: int = 8,
+    ) -> dict:
+        return self.autonomy.probe_routes(
+            peer_id=peer_id,
+            base_url=base_url,
+            timeout=timeout,
+            limit=limit,
+        )
+
+    def autonomy_status(self) -> dict:
+        return self.autonomy.status()
+
+    def activate_autonomic_mesh(
+        self,
+        *,
+        mode: str = "assisted",
+        limit: int = 24,
+        scan_timeout: float = 0.8,
+        timeout: float = 3.0,
+        run_proof: bool = True,
+        repair: bool = True,
+        max_enlist: int = 2,
+        actor_agent_id: str = "ocp-autonomy",
+        request_id: Optional[str] = None,
+    ) -> dict:
+        return self.autonomy.activate(
+            mode=mode,
+            limit=limit,
+            scan_timeout=scan_timeout,
+            timeout=timeout,
+            run_proof=run_proof,
+            repair=repair,
+            max_enlist=max_enlist,
+            actor_agent_id=actor_agent_id,
+            request_id=request_id,
+        )
 
     def scan_local_peers(
         self,
@@ -4558,9 +4660,17 @@ class SovereignMesh:
             or metadata_data.get("env_policy")
             or {}
         )
+        raw_inherit_allowlist = env_policy_raw.get("inherit_env_allowlist") or []
+        if isinstance(raw_inherit_allowlist, str):
+            raw_inherit_allowlist = [item.strip() for item in raw_inherit_allowlist.split(",")]
         env_policy = {
-            "inherit_host_env": _coerce_bool(env_policy_raw.get("inherit_host_env") if "inherit_host_env" in env_policy_raw else True),
+            "inherit_host_env": _coerce_bool(env_policy_raw.get("inherit_host_env") if "inherit_host_env" in env_policy_raw else False),
             "allow_env_override": _coerce_bool(env_policy_raw.get("allow_env_override") if "allow_env_override" in env_policy_raw else True),
+            "inherit_env_allowlist": [
+                _normalize_env_var_name(item)
+                for item in raw_inherit_allowlist
+                if str(item or "").strip()
+            ],
         }
         filesystem_raw = dict(
             runtime_data.get("filesystem")
@@ -4850,7 +4960,7 @@ class SovereignMesh:
         if runtime_type not in {"shell", "python", "container", "wasm", "custom"}:
             raise MeshPolicyError("unsupported runtime_type")
         env_policy = dict(runtime_environment.get("env_policy") or {})
-        if set(env_policy.keys()) - {"inherit_host_env", "allow_env_override"}:
+        if set(env_policy.keys()) - {"inherit_host_env", "allow_env_override", "inherit_env_allowlist"}:
             raise MeshPolicyError("unsupported env_policy field")
         filesystem = dict(runtime_environment.get("filesystem") or {})
         if str(filesystem.get("profile") or "workspace") not in {"workspace", "isolated", "custom"}:

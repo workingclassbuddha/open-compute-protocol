@@ -16,6 +16,37 @@ def mesh_pressure(mesh: SovereignMesh) -> dict[str, Any]:
     return mesh.mesh_pressure()
 
 
+def autonomy_status(mesh: SovereignMesh) -> dict[str, Any]:
+    return mesh.autonomy_status()
+
+
+def activate_autonomic_mesh(mesh: SovereignMesh, data: dict[str, Any]) -> dict[str, Any]:
+    return mesh.activate_autonomic_mesh(
+        mode=(data.get("mode") or "assisted").strip(),
+        limit=int(data.get("limit") or 24),
+        scan_timeout=float(data.get("scan_timeout") or 0.8),
+        timeout=float(data.get("timeout") or 3.0),
+        run_proof=bool(data.get("run_proof", True)),
+        repair=bool(data.get("repair", True)),
+        max_enlist=int(data.get("max_enlist") or 2),
+        actor_agent_id=(data.get("actor_agent_id") or "ocp-control-ui").strip(),
+        request_id=(data.get("request_id") or "").strip() or None,
+    )
+
+
+def routes_health(mesh: SovereignMesh, *, limit: int = 50) -> dict[str, Any]:
+    return mesh.routes_health(limit=limit)
+
+
+def probe_routes(mesh: SovereignMesh, data: dict[str, Any]) -> dict[str, Any]:
+    return mesh.probe_routes(
+        peer_id=(data.get("peer_id") or "").strip(),
+        base_url=(data.get("base_url") or "").strip(),
+        timeout=float(data.get("timeout") or 2.0),
+        limit=int(data.get("limit") or 8),
+    )
+
+
 def list_helpers(mesh: SovereignMesh, *, limit: int = 100) -> dict[str, Any]:
     return mesh.list_helpers(limit=limit)
 
@@ -348,12 +379,15 @@ def replay_queue_message(mesh: SovereignMesh, data: dict[str, Any]) -> dict[str,
 
 
 def set_queue_ack_deadline(mesh: SovereignMesh, data: dict[str, Any]) -> dict[str, Any]:
+    ttl_seconds = data.get("ttl_seconds")
+    if ttl_seconds is None:
+        ttl_seconds = data.get("ack_deadline_seconds")
     return {
         "status": "ok",
         "queue_message": mesh.set_queue_ack_deadline(
             queue_message_id=(data.get("queue_message_id") or "").strip(),
             attempt_id=(data.get("attempt_id") or "").strip(),
-            ttl_seconds=int(data.get("ttl_seconds") or 0),
+            ttl_seconds=int(ttl_seconds or 0),
             reason=(data.get("reason") or "operator_ack_deadline_update").strip(),
         ),
     }

@@ -15,6 +15,7 @@ from mesh import SovereignMesh
 from mesh.sovereign import _normalize_base_url, _preferred_local_base_url
 from runtime import OCPRegistry, OCPStore
 from server_app import build_app_manifest as _build_app_manifest, build_app_page as _build_app_page
+from server_app_status import build_app_status as _build_app_status
 from server_connect import build_easy_page as _build_easy_page
 from server_control import (
     build_control_state as _build_control_state,
@@ -76,6 +77,10 @@ def build_app_page(mesh: SovereignMesh) -> str:
 
 def build_app_manifest(mesh: SovereignMesh) -> dict[str, Any]:
     return _build_app_manifest(mesh)
+
+
+def build_app_status(mesh: SovereignMesh) -> dict[str, Any]:
+    return _build_app_status(mesh)
 
 
 class OCPHandler(OCPRouteHandlerMixin, BaseHTTPRequestHandler):

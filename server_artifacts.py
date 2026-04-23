@@ -53,11 +53,17 @@ def get_artifact(
     )
 
 
-def get_artifact_from_path(mesh: SovereignMesh, path: str, params: dict[str, list[str]]) -> dict[str, Any]:
+def get_artifact_from_path(
+    mesh: SovereignMesh,
+    path: str,
+    params: dict[str, list[str]],
+    *,
+    requester_peer_id: str = "",
+) -> dict[str, Any]:
     return get_artifact(
         mesh,
         _extract_path_id(path, "/mesh/artifacts/"),
-        requester_peer_id=params.get("peer_id", [""])[0],
+        requester_peer_id=requester_peer_id,
         include_content=params.get("include_content", ["1"])[0] != "0",
     )
 

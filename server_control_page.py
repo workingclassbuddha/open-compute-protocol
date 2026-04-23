@@ -2256,6 +2256,40 @@ def build_control_page(mesh: SovereignMesh) -> str:
       <div class="ocp-error" data-error-for="connect"></div>
     </section>
 
+    <section class="ocp-section" data-section>
+      <div class="ocp-section__header">
+        <div>
+          <h2 class="ocp-section__title">Autonomic Mesh</h2>
+          <p class="ocp-section__subtitle">Press once and OCP will discover, verify routes, choose safe helpers, run a proof, and explain what changed.</p>
+        </div>
+        <span class="ocp-pill ocp-pill--eligible" id="autonomic-state-pill">ASSISTED</span>
+      </div>
+      <div class="ocp-connect-layout">
+        <div class="ocp-connect-panel">
+          <div class="ocp-connect-panel__head">
+            <div>
+              <span class="ocp-version">Self-Healing Fabric</span>
+              <div class="ocp-connect-summary" id="autonomic-summary"></div>
+            </div>
+            <div class="ocp-connect-actions">
+              <button class="ocp-button ocp-button--primary" type="button" data-action="activate-autonomic-mesh">Activate Autonomic Mesh</button>
+              <a class="ocp-button ocp-button--secondary" href="/mesh/autonomy/status" target="_blank" rel="noreferrer">Inspect JSON</a>
+            </div>
+          </div>
+          <div class="ocp-connect-grid" id="autonomic-action-grid"></div>
+        </div>
+        <aside class="ocp-connect-diagnostics">
+          <div>
+            <span class="ocp-version">Route Health</span>
+            <h3 class="ocp-section__title" style="font-size:18px; margin-top:8px;">Working Paths</h3>
+            <p class="ocp-section__subtitle" style="margin-top:8px;">OCP now remembers the routes that actually respond, so bad advertised IPs stop poisoning dispatch.</p>
+          </div>
+          <div class="ocp-connect-diagnostics__list" id="route-health-list"></div>
+        </aside>
+      </div>
+      <div class="ocp-error" data-error-for="autonomic"></div>
+    </section>
+
     <main class="ocp-main">
       <div class="ocp-column">
         <section class="ocp-section" data-section>
@@ -2443,6 +2477,8 @@ def build_control_page(mesh: SovereignMesh) -> str:
       { label: "/mesh/peers", href: "/mesh/peers" },
       { label: "/mesh/discovery/candidates", href: "/mesh/discovery/candidates" },
       { label: "/mesh/connectivity/diagnostics", href: "/mesh/connectivity/diagnostics" },
+      { label: "/mesh/autonomy/status", href: "/mesh/autonomy/status" },
+      { label: "/mesh/routes/health", href: "/mesh/routes/health" },
       { label: "/mesh/queue", href: "/mesh/queue" },
       { label: "/mesh/notifications", href: "/mesh/notifications" },
       { label: "/mesh/approvals", href: "/mesh/approvals" },
@@ -2458,6 +2494,41 @@ def build_control_page(mesh: SovereignMesh) -> str:
       { label: "/mesh/helpers/autonomy", href: "/mesh/helpers/autonomy" },
       { label: "/mesh/helpers/preferences", href: "/mesh/helpers/preferences" }
     ];
+    const OCP_OPERATOR_TOKEN_KEY = "ocp_operator_token";
+    function consumeOperatorToken() {
+      const hash = String(window.location.hash || "");
+      let token = "";
+      if (hash.indexOf("#ocp_operator_token=") === 0) {
+        token = decodeURIComponent(hash.slice("#ocp_operator_token=".length));
+      } else if (hash.indexOf("ocp_operator_token=") !== -1) {
+        token = new URLSearchParams(hash.replace(/^#/, "")).get("ocp_operator_token") || "";
+      }
+      if (token) {
+        try {
+          window.localStorage.setItem(OCP_OPERATOR_TOKEN_KEY, token);
+        } catch (error) {
+        }
+        history.replaceState(null, "", window.location.pathname + window.location.search);
+      }
+    }
+    function operatorToken() {
+      try {
+        return String(window.localStorage.getItem(OCP_OPERATOR_TOKEN_KEY) || "").trim();
+      } catch (error) {
+        return "";
+      }
+    }
+    function withOperatorAuth(options) {
+      const next = Object.assign({}, options || {});
+      const headers = new Headers(next.headers || {});
+      const token = operatorToken();
+      if (token && !headers.has("X-OCP-Operator-Token")) {
+        headers.set("X-OCP-Operator-Token", token);
+      }
+      next.headers = headers;
+      return next;
+    }
+    consumeOperatorToken();
     const app = {
       state: OCP_CONTROL_BOOTSTRAP,
       meshScene: null,
@@ -2550,7 +2621,7 @@ def build_control_page(mesh: SovereignMesh) -> str:
     }
 
     async function fetchJson(url, options) {
-      const response = await fetch(url, options);
+      const response = await fetch(url, withOperatorAuth(options));
       if (!response.ok) {
         let message = response.status + " " + response.statusText;
         try {
@@ -4136,6 +4207,79 @@ def build_control_page(mesh: SovereignMesh) -> str:
       clearError("connect");
     }
 
+    function renderAutonomicMesh(state) {
+      const autonomic = state.autonomic_mesh || {};
+      const routes = autonomic.routes || {};
+      const routeItems = routes.routes || [];
+      const lastRun = autonomic.last_run || {};
+      const actions = (lastRun.actions || []).slice(-6).reverse();
+      const summary = document.getElementById("autonomic-summary");
+      const grid = document.getElementById("autonomic-action-grid");
+      const routeList = document.getElementById("route-health-list");
+      const pill = document.getElementById("autonomic-state-pill");
+      if (!summary || !grid || !routeList || !pill) {
+        return;
+      }
+      const healthy = Number(routes.healthy || 0);
+      const count = Number(routes.count || 0);
+      const status = String((lastRun.status || autonomic.status || "assisted")).toLowerCase();
+      summary.innerHTML = [
+        '<span>' + escapeHtml(String(healthy) + " proven route" + (healthy === 1 ? "" : "s")) + '</span>',
+        '<span>' + escapeHtml(String(count) + " peer" + (count === 1 ? "" : "s")) + '</span>',
+        '<span>' + escapeHtml(lastRun.updated_at ? ("last run " + relativeTime(lastRun.updated_at)) : "ready now") + '</span>'
+      ].join("");
+      if (status === "completed" || (count && healthy === count)) {
+        pill.textContent = "MESH STRONG";
+        pill.className = "ocp-pill ocp-pill--eligible";
+      } else if (status === "approval_requested") {
+        pill.textContent = "APPROVAL NEEDED";
+        pill.className = "ocp-pill ocp-pill--warn";
+      } else if (status === "needs_attention" || status === "failed") {
+        pill.textContent = "NEEDS ATTENTION";
+        pill.className = "ocp-pill ocp-pill--blocked";
+      } else {
+        pill.textContent = "ASSISTED";
+        pill.className = "ocp-pill ocp-pill--violet";
+      }
+
+      const explanation = autonomic.operator_summary || "Press Activate Autonomic Mesh to discover, repair, enlist, prove, and summarize this mesh.";
+      const actionCards = actions.length ? actions.map(function (action) {
+        const actionStatus = String(action.status || "ok").toLowerCase();
+        const tone = actionStatus === "ok" || actionStatus === "completed"
+          ? "safe"
+          : (actionStatus === "warning" || actionStatus === "approval_required" ? "warn" : "blocked");
+        return '<article class="ocp-connect-card">' +
+          '<div class="ocp-connect-card__head">' +
+            '<div>' +
+              '<h3 class="ocp-connect-card__title">' + escapeHtml(String(action.kind || "autonomy").replace(/_/g, " ")) + '</h3>' +
+              '<div class="ocp-connect-card__endpoint">' + escapeHtml(action.peer_id || "local mesh") + '</div>' +
+            '</div>' +
+            '<span class="ocp-pill ' + pillClass(tone) + '">' + escapeHtml(actionStatus.toUpperCase().replace(/_/g, " ")) + '</span>' +
+          '</div>' +
+          '<div class="ocp-connect-card__copy">' + escapeHtml(action.summary || "Autonomic action recorded.") + '</div>' +
+        '</article>';
+      }).join("") : '<article class="ocp-connect-card"><div class="ocp-connect-card__copy">' + escapeHtml(explanation) + '</div></article>';
+      grid.innerHTML = actionCards;
+
+      routeList.innerHTML = routeItems.length ? routeItems.map(function (route) {
+        const routeStatus = String(route.status || "unknown").toLowerCase();
+        const freshness = String(route.freshness || "").toLowerCase();
+        const tone = routeStatus === "reachable" && freshness !== "stale" ? "safe" : (routeStatus === "unreachable" ? "danger" : "warn");
+        const freshnessCopy = freshness
+          ? "Route proof: " + freshness + (route.age_seconds != null ? " (" + String(route.age_seconds) + "s old)" : "")
+          : "";
+        const hint = route.operator_hint || route.operator_summary || "No route summary yet.";
+        return '<div class="ocp-connect-error">' +
+          '<strong>' + escapeHtml(route.display_name || route.peer_id || "Peer") + '</strong><br>' +
+          '<span class="ocp-pill ' + pillClass(tone) + '">' + escapeHtml(routeStatus.toUpperCase()) + '</span> ' +
+          (freshness ? '<span class="ocp-pill ' + pillClass(freshness === "fresh" ? "safe" : "warn") + '">' + escapeHtml(freshness.toUpperCase()) + '</span> ' : '') +
+          '<span class="ocp-mono">' + escapeHtml(compactEndpoint(route.best_route || route.last_reachable_base_url || "")) + '</span><br>' +
+          escapeHtml(freshnessCopy ? freshnessCopy + ". " + hint : hint) +
+        '</div>';
+      }).join("") : '<div class="ocp-empty">' + escapeHtml((autonomic.recommended_actions || [])[0] || "No peer routes yet. Activate the mesh to scan and prove nearby devices.") + '</div>';
+      clearError("autonomic");
+    }
+
     function renderAutonomy(state) {
       const autonomy = state.autonomy || {};
       const policy = autonomy.policy || {};
@@ -4394,6 +4538,7 @@ def build_control_page(mesh: SovereignMesh) -> str:
       renderHero(state);
       renderPulse(state);
       renderConnectDevices(state);
+      renderAutonomicMesh(state);
       renderCenterpiece(state);
       renderOperations(state);
       renderMissions(state);
@@ -4643,6 +4788,7 @@ def build_control_page(mesh: SovereignMesh) -> str:
         { key: "pressure", url: "/mesh/pressure", section: "centerpiece" },
         { key: "helpers", url: "/mesh/helpers?limit=12", section: "fleet" },
         { key: "cooperative_tasks", url: "/mesh/cooperative-tasks?limit=6", section: "tasks" },
+        { key: "autonomic_mesh", url: "/mesh/autonomy/status", section: "autonomic" },
         { key: "autonomy", url: "/mesh/helpers/autonomy", section: "autonomy" },
         { key: "preferences", url: "/mesh/helpers/preferences?limit=6", section: "offload" }
       ];
@@ -4833,6 +4979,24 @@ def build_control_page(mesh: SovereignMesh) -> str:
       });
     }
 
+    async function activateAutonomicMesh(options) {
+      const payload = Object.assign({
+        mode: "assisted",
+        limit: 24,
+        scan_timeout: 0.8,
+        timeout: 3.0,
+        run_proof: true,
+        repair: true,
+        max_enlist: 2,
+        actor_agent_id: "ocp-mobile-ui"
+      }, options || {});
+      return fetchJson("/mesh/autonomy/activate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+    }
+
     async function acknowledgeNotification(notificationId) {
       await fetchJson("/mesh/notifications/" + encodeURIComponent(notificationId) + "/ack", {
         method: "POST",
@@ -4998,6 +5162,19 @@ def build_control_page(mesh: SovereignMesh) -> str:
             }).catch(function (error) {
               showError("connect", "Whole mesh proof failed: " + error.message);
               setStatus("Whole mesh proof failed: " + error.message);
+            }).finally(function () {
+              buttonLoading(actionButton, false);
+            });
+            return;
+          }
+          if (action === "activate-autonomic-mesh") {
+            setStatus("Activating Autonomic Mesh...");
+            activateAutonomicMesh().then(function (result) {
+              setStatus(result.operator_summary || result.summary || "Autonomic Mesh activation complete.");
+              return fetchState({ silent: true });
+            }).catch(function (error) {
+              showError("autonomic", "Autonomic Mesh activation failed: " + error.message);
+              setStatus("Autonomic Mesh activation failed: " + error.message);
             }).finally(function () {
               buttonLoading(actionButton, false);
             });

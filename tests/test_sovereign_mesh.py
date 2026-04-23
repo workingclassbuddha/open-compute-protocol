@@ -32,6 +32,9 @@ import server_missions
 import server_ops
 import server_routes
 import server_runtime
+import ocp_startup
+from ocp_desktop import launcher as ocp_launcher
+from ocp_desktop import macos_app as ocp_macos_app
 from mesh import (
     MeshArtifactAccessError,
     MeshPeerClient,
@@ -110,6 +113,7 @@ ProbeHandler._dispatch_get_request = server.OCPHandler._dispatch_get_request
 ProbeHandler._dispatch_post_request = server.OCPHandler._dispatch_post_request
 ProbeHandler._handle_app_page = server.OCPHandler._handle_app_page
 ProbeHandler._handle_app_manifest = server.OCPHandler._handle_app_manifest
+ProbeHandler._handle_mesh_app_status = server.OCPHandler._handle_mesh_app_status
 ProbeHandler._handle_control_page = server.OCPHandler._handle_control_page
 ProbeHandler._handle_easy_page = server.OCPHandler._handle_easy_page
 ProbeHandler._handle_mesh_contract = server.OCPHandler._handle_mesh_contract
@@ -117,6 +121,11 @@ ProbeHandler._handle_mesh_manifest = server.OCPHandler._handle_mesh_manifest
 ProbeHandler._handle_mesh_device_profile = server.OCPHandler._handle_mesh_device_profile
 ProbeHandler._handle_mesh_device_profile_update = server.OCPHandler._handle_mesh_device_profile_update
 ProbeHandler._handle_mesh_connectivity_diagnostics = server.OCPHandler._handle_mesh_connectivity_diagnostics
+ProbeHandler._handle_mesh_handshake = server.OCPHandler._handle_mesh_handshake
+ProbeHandler._handle_mesh_autonomy_status = server.OCPHandler._handle_mesh_autonomy_status
+ProbeHandler._handle_mesh_autonomy_activate = server.OCPHandler._handle_mesh_autonomy_activate
+ProbeHandler._handle_mesh_routes_health = server.OCPHandler._handle_mesh_routes_health
+ProbeHandler._handle_mesh_routes_probe = server.OCPHandler._handle_mesh_routes_probe
 ProbeHandler._handle_mesh_discovery_candidates = server.OCPHandler._handle_mesh_discovery_candidates
 ProbeHandler._handle_mesh_discovery_seek = server.OCPHandler._handle_mesh_discovery_seek
 ProbeHandler._handle_mesh_discovery_scan_local = server.OCPHandler._handle_mesh_discovery_scan_local
@@ -173,6 +182,8 @@ ProbeHandler._handle_mesh_scheduler_decisions = server.OCPHandler._handle_mesh_s
 ProbeHandler._handle_mesh_job_resume = server.OCPHandler._handle_mesh_job_resume
 ProbeHandler._handle_mesh_job_resume_from_checkpoint = server.OCPHandler._handle_mesh_job_resume_from_checkpoint
 ProbeHandler._handle_mesh_job_restart = server.OCPHandler._handle_mesh_job_restart
+ProbeHandler._handle_mesh_artifact_get = server.OCPHandler._handle_mesh_artifact_get
+ProbeHandler._artifact_content_is_public = server.OCPHandler._artifact_content_is_public
 
 
 def make_mesh_http_server(mesh):
@@ -242,6 +253,15 @@ def make_mesh_http_server(mesh):
                     return
                 if path == "/mesh/connectivity/diagnostics":
                     self._send_json(mesh.connectivity_diagnostics(limit=24))
+                    return
+                if path == "/mesh/app/status":
+                    self._send_json(server.build_app_status(mesh))
+                    return
+                if path == "/mesh/autonomy/status":
+                    self._send_json(mesh.autonomy_status())
+                    return
+                if path == "/mesh/routes/health":
+                    self._send_json(mesh.routes_health(limit=50))
                     return
                 if path == "/mesh/discovery/candidates":
                     limit = int(params.get("limit", ["25"])[0])
@@ -338,7 +358,7 @@ def make_mesh_http_server(mesh):
                     return
                 if path == "/mesh/queue/events":
                     limit = int(params.get("limit", ["50"])[0])
-                    since_seq = int(params.get("since", ["0"])[0])
+                    since_seq = int(params.get("since", params.get("since_seq", ["0"]))[0])
                     self._send_json(
                         mesh.list_queue_events(
                             since_seq=since_seq,
@@ -405,6 +425,31 @@ def make_mesh_http_server(mesh):
                     return
                 if path == "/mesh/device-profile":
                     self._send_json(mesh.update_device_profile(dict(payload.get("device_profile") or {})))
+                    return
+                if path == "/mesh/autonomy/activate":
+                    self._send_json(
+                        mesh.activate_autonomic_mesh(
+                            mode=(payload.get("mode") or "assisted").strip(),
+                            limit=int(payload.get("limit") or 24),
+                            scan_timeout=float(payload.get("scan_timeout") or 0.8),
+                            timeout=float(payload.get("timeout") or 3.0),
+                            run_proof=bool(payload.get("run_proof", True)),
+                            repair=bool(payload.get("repair", True)),
+                            max_enlist=int(payload.get("max_enlist") or 2),
+                            actor_agent_id=(payload.get("actor_agent_id") or "test-http").strip(),
+                            request_id=(payload.get("request_id") or "").strip() or None,
+                        )
+                    )
+                    return
+                if path == "/mesh/routes/probe":
+                    self._send_json(
+                        mesh.probe_routes(
+                            peer_id=(payload.get("peer_id") or "").strip(),
+                            base_url=(payload.get("base_url") or "").strip(),
+                            timeout=float(payload.get("timeout") or 2.0),
+                            limit=int(payload.get("limit") or 8),
+                        )
+                    )
                     return
                 if path == "/mesh/discovery/seek":
                     self._send_json(
@@ -859,7 +904,7 @@ def make_mesh_http_server(mesh):
                         mesh.set_queue_ack_deadline(
                             queue_message_id=(payload.get("queue_message_id") or "").strip(),
                             attempt_id=(payload.get("attempt_id") or "").strip(),
-                            ttl_seconds=int(payload.get("ttl_seconds") or 0),
+                            ttl_seconds=int(payload.get("ttl_seconds", payload.get("ack_deadline_seconds", 0)) or 0),
                             reason=(payload.get("reason") or "operator_ack_deadline_update").strip(),
                         )
                     )
@@ -2236,7 +2281,11 @@ class SovereignMeshTests(unittest.TestCase):
                     "payload": {
                         "command": [sys.executable, "-c", code],
                         "env": {"SHARED_ENV": "job-shared", "EXPLICIT_ENV": "job-explicit"},
-                        "env_policy": {"inherit_host_env": True, "allow_env_override": False},
+                        "env_policy": {
+                            "inherit_host_env": True,
+                            "inherit_env_allowlist": ["SHARED_ENV", "HOST_ONLY_ENV"],
+                            "allow_env_override": False,
+                        },
                         "secrets": {"INLINE_TOKEN": {"value": "super-secret", "scope": "mesh.ops"}},
                     },
                     "artifact_inputs": [],
@@ -2668,6 +2717,8 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(result["image"], "python:3.12-alpine")
         self.assertEqual(result["network_mode"], "none")
         self.assertTrue(result["mounted_workspace"])
+        self.assertNotIn("mesh-secret", json.dumps(result, sort_keys=True))
+        self.assertIn("INLINE_TOKEN=<redacted>", result["docker_argv"])
         self.assertEqual(len(docker_calls), 1)
 
     def test_queued_wasm_component_job_runs_through_wasmtime_and_publishes_result_artifact(self):
@@ -2734,6 +2785,8 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(result["stdout"], "hello from wasm\n")
         self.assertEqual(result["component_ref"]["id"], component_artifact["id"])
         self.assertEqual(result["network_mode"], "none")
+        self.assertNotIn("mesh-secret", json.dumps(result, sort_keys=True))
+        self.assertIn("INLINE_TOKEN=<redacted>", result["wasm_argv"])
         self.assertTrue(result["preopened_dir"])
         self.assertEqual(len(wasm_calls), 1)
 
@@ -4611,6 +4664,40 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("reliability_bonus", beta_candidate["reasons"])
         self.assertIn("reliability_penalty", gamma_candidate["reasons"])
 
+    def test_scheduler_scores_route_health_and_artifact_checkpoint_locality(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        self._register_default_worker(beta, worker_id="beta-locality-worker")
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_peer(base_url=beta_base_url, trust_tier="trusted")
+        alpha.mesh._update_peer_record(
+            "beta-node",
+            metadata={
+                "route_health": {"status": "reachable", "best_route": beta_base_url, "checked_at": "2026-01-01T00:00:00Z"},
+                "artifact_inventory": {"digests": ["sha256:input"]},
+                "checkpoint_inventory": {"artifact_ids": ["checkpoint-artifact"]},
+            },
+        )
+        peer = alpha.mesh.list_peers(limit=10)["peers"][0]
+        score, reasons, _ = alpha.mesh.scheduler.peer_candidate_score(
+            peer,
+            {
+                "kind": "python.inline",
+                "dispatch_mode": "inline",
+                "requirements": {},
+                "policy": {"classification": "trusted", "mode": "batch"},
+                "payload": {"code": "print('locality')"},
+                "artifact_inputs": [{"artifact_id": "input-artifact", "digest": "sha256:input"}],
+                "metadata": {"resume_checkpoint_ref": {"artifact_id": "checkpoint-artifact"}},
+            },
+        )
+
+        self.assertGreater(score, 0)
+        self.assertIn("route_last_reachable", reasons)
+        self.assertIn("route_probe_reachable", reasons)
+        self.assertIn("artifact_locality_match=1", reasons)
+        self.assertIn("checkpoint_locality_match=1", reasons)
+
     def test_list_peers_exposes_remote_reliability_summary(self):
         alpha = self.make_stack("alpha")
         beta = self.make_stack("beta")
@@ -4904,6 +4991,9 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("Connect Everything", probe.payload)
         self.assertIn("Test Whole Mesh", probe.payload)
         self.assertIn("Send Test Mission", probe.payload)
+        self.assertIn("Autonomic Mesh", probe.payload)
+        self.assertIn("Activate Autonomic Mesh", probe.payload)
+        self.assertIn("/mesh/autonomy/status", probe.payload)
         self.assertIn("Live Mission Stream", probe.payload)
         self.assertIn("Operator Inspect", probe.payload)
         self.assertIn("Recovery + Queue", probe.payload)
@@ -4948,6 +5038,84 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(manifest_probe.payload["short_name"], "OCP")
         self.assertEqual(manifest_probe.payload["start_url"], "/app")
         self.assertEqual(manifest_probe.payload["display"], "standalone")
+
+    def test_raw_mesh_post_routes_require_operator_auth_off_loopback(self):
+        alpha = self.make_stack("alpha")
+        payload = {"device_profile": {"form_factor": "phone"}}
+
+        probe = ProbeHandler()
+        probe.server = SimpleNamespace(mesh=alpha.mesh)
+        probe.client_address = ("198.51.100.10", 4444)
+        probe.headers = {}
+        self.assertTrue(probe._dispatch_post_request("/mesh/device-profile", payload))
+        self.assertEqual(probe.code, 401)
+        self.assertEqual(probe.payload["error"], "operator authorization required")
+
+        signed_probe = ProbeHandler()
+        signed_probe.server = SimpleNamespace(mesh=alpha.mesh)
+        signed_probe.client_address = ("198.51.100.10", 4444)
+        signed_probe.headers = {}
+        self.assertTrue(signed_probe._dispatch_post_request("/mesh/handshake", {}))
+        self.assertEqual(signed_probe.code, 400)
+        self.assertEqual(signed_probe.payload["error"], "protocol validation failed")
+
+        with mock.patch.dict(os.environ, {"OCP_OPERATOR_TOKEN": "secret-token"}, clear=False):
+            authorized = ProbeHandler()
+            authorized.server = SimpleNamespace(mesh=alpha.mesh)
+            authorized.client_address = ("198.51.100.10", 4444)
+            authorized.headers = {"Authorization": "Bearer secret-token"}
+            self.assertTrue(authorized._dispatch_post_request("/mesh/device-profile", payload))
+            self.assertEqual(authorized.code, 200)
+            self.assertEqual(authorized.payload["status"], "ok")
+
+    def test_artifact_http_content_requires_operator_auth_or_public_policy(self):
+        beta = self.make_stack("beta")
+        private_artifact = beta.mesh.publish_local_artifact(
+            {"kind": "private-artifact"},
+            media_type="application/json",
+            policy={"classification": "trusted", "mode": "batch"},
+            metadata={"artifact_kind": "bundle"},
+        )
+        artifact_path = f"/mesh/artifacts/{private_artifact['id']}"
+
+        spoofed = ProbeHandler()
+        spoofed.server = SimpleNamespace(mesh=beta.mesh)
+        spoofed.client_address = ("198.51.100.10", 4444)
+        spoofed.headers = {}
+        self.assertTrue(spoofed._dispatch_get_request(artifact_path, {"peer_id": ["beta-node"]}))
+        self.assertEqual(spoofed.code, 401)
+        self.assertEqual(spoofed.payload["error"], "operator authorization required")
+
+        metadata_only = ProbeHandler()
+        metadata_only.server = SimpleNamespace(mesh=beta.mesh)
+        metadata_only.client_address = ("198.51.100.10", 4444)
+        metadata_only.headers = {}
+        self.assertTrue(metadata_only._dispatch_get_request(artifact_path, {"include_content": ["0"]}))
+        self.assertEqual(metadata_only.code, 200)
+        self.assertNotIn("content_base64", metadata_only.payload)
+
+        with mock.patch.dict(os.environ, {"OCP_OPERATOR_TOKEN": "secret-token"}, clear=False):
+            authorized = ProbeHandler()
+            authorized.server = SimpleNamespace(mesh=beta.mesh)
+            authorized.client_address = ("198.51.100.10", 4444)
+            authorized.headers = {"X-OCP-Operator-Token": "secret-token"}
+            self.assertTrue(authorized._dispatch_get_request(artifact_path, {}))
+            self.assertEqual(authorized.code, 200)
+            self.assertIn("content_base64", authorized.payload)
+
+        public_artifact = beta.mesh.publish_local_artifact(
+            {"kind": "public-artifact"},
+            media_type="application/json",
+            policy={"classification": "public", "mode": "batch"},
+            metadata={"artifact_kind": "bundle"},
+        )
+        public_probe = ProbeHandler()
+        public_probe.server = SimpleNamespace(mesh=beta.mesh)
+        public_probe.client_address = ("198.51.100.10", 4444)
+        public_probe.headers = {}
+        self.assertTrue(public_probe._dispatch_get_request(f"/mesh/artifacts/{public_artifact['id']}", {}))
+        self.assertEqual(public_probe.code, 200)
+        self.assertIn("content_base64", public_probe.payload)
 
     def test_server_easy_page_handler_returns_human_friendly_html(self):
         alpha = self.make_stack("alpha")
@@ -5085,6 +5253,344 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertGreaterEqual(probe.payload["mesh"]["peer_count"], 2)
         self.assertEqual(probe.payload["mission"]["summary"]["cooperative_task_count"], 1)
         self.assertEqual(probe.payload["mission"]["summary"]["job_count"], 2)
+
+    def test_autonomic_route_candidates_prefer_proven_routes_before_advertised_endpoint(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        beta_card = dict(beta.mesh.get_manifest()["organism_card"])
+        beta_card["endpoint_url"] = "http://advertised.invalid:8421"
+        peer = alpha.mesh.remember_peer_card(
+            beta_card,
+            trust_tier="trusted",
+            status="connected",
+            metadata={
+                "last_reachable_base_url": "http://last-good.local:8421",
+                "route_candidates": [{"base_url": "http://history.local:8421", "source": "history", "status": "reachable"}],
+            },
+        )
+        alpha.mesh._remember_discovery_candidate(
+            base_url="http://discovery.local:8421",
+            peer_id="beta-node",
+            display_name="Beta",
+            endpoint_url="http://discovery.local:8421",
+            status="discovered",
+            trust_tier="trusted",
+        )
+
+        candidates = alpha.mesh.autonomy.route_candidates_for_peer(peer, base_url="http://explicit.local:8421")
+
+        self.assertEqual([item["source"] for item in candidates[:5]], ["explicit", "last_reachable", "history", "discovery", "advertised"])
+        self.assertEqual(candidates[0]["base_url"], "http://explicit.local:8421")
+        self.assertEqual(candidates[-1]["base_url"], "http://advertised.invalid:8421")
+
+    def test_route_probe_records_last_reachable_route_health(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_device(base_url=beta_base_url, trust_tier="trusted")
+
+        probe = alpha.mesh.probe_routes(peer_id="beta-node", base_url=beta_base_url, timeout=2.0)
+
+        self.assertEqual(probe["status"], "ok")
+        self.assertEqual(probe["best_route"], beta_base_url)
+        peer = alpha.mesh.list_peers(limit=10)["peers"][0]
+        metadata = peer["metadata"]
+        self.assertEqual(metadata["last_reachable_base_url"], beta_base_url)
+        self.assertEqual(metadata["route_health"]["status"], "reachable")
+        self.assertEqual(metadata["route_candidates"][0]["base_url"], beta_base_url)
+        self.assertEqual(metadata["route_candidates"][0]["freshness"], "fresh")
+
+    def test_route_probe_failure_records_operator_hint_and_backoff(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        beta_card = dict(beta.mesh.get_manifest()["organism_card"])
+        beta_card["endpoint_url"] = "http://127.0.0.1:1"
+        alpha.mesh.remember_peer_card(beta_card, trust_tier="trusted", status="connected")
+
+        probe = alpha.mesh.probe_routes(peer_id="beta-node", timeout=0.2, limit=1)
+
+        self.assertEqual(probe["status"], "attention_needed")
+        self.assertEqual(probe["reachable"], 0)
+        self.assertIn("not listening", probe["operator_hint"])
+        candidate = probe["candidates"][0]
+        self.assertEqual(candidate["failure_count"], 1)
+        self.assertTrue(candidate["next_probe_after"])
+        self.assertEqual(candidate["freshness"], "failed")
+        route = alpha.mesh.routes_health(limit=10)["routes"][0]
+        self.assertEqual(route["failure_count"], 1)
+        self.assertEqual(route["freshness"], "failed")
+        self.assertIn("not listening", route["operator_hint"])
+
+    def test_route_health_marks_stale_reachable_proofs_without_forgetting_route(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_device(base_url=beta_base_url, trust_tier="trusted")
+        alpha.mesh._update_peer_record(
+            "beta-node",
+            metadata={
+                "last_reachable_base_url": beta_base_url,
+                "route_health": {
+                    "status": "reachable",
+                    "best_route": beta_base_url,
+                    "checked_at": "2026-01-01T00:00:00Z",
+                    "last_success_at": "2026-01-01T00:00:00Z",
+                },
+            },
+        )
+
+        route = alpha.mesh.routes_health(limit=10)["routes"][0]
+
+        self.assertEqual(route["status"], "reachable")
+        self.assertEqual(route["freshness"], "stale")
+        self.assertEqual(route["best_route"], beta_base_url)
+        self.assertIn("stale", route["operator_summary"])
+        health = alpha.mesh.routes_health(limit=10)
+        self.assertEqual(health["healthy"], 0)
+        self.assertNotIn("strong", alpha.mesh.autonomy_status()["operator_summary"].lower())
+
+    def test_dispatch_uses_proven_route_when_advertised_endpoint_is_poisoned(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_device(base_url=beta_base_url, trust_tier="trusted")
+        with alpha.mesh._conn() as conn:
+            conn.execute("UPDATE mesh_peers SET endpoint_url=? WHERE peer_id=?", ("http://127.0.0.1:1", "beta-node"))
+            conn.commit()
+
+        result = alpha.mesh.launch_test_mission(peer_id="beta-node")
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["mission"]["summary"]["cooperative_task_count"], 1)
+        self.assertEqual(result["mission"]["summary"]["job_count"], 1)
+
+    def test_autonomic_activation_connects_probes_enlists_and_runs_proof(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        _, beta_base_url = self.serve_mesh(beta)
+        original = alpha.mesh.suggest_local_scan_urls
+        alpha.mesh.suggest_local_scan_urls = lambda **_: [beta_base_url]
+        try:
+            result = alpha.mesh.activate_autonomic_mesh(
+                limit=12,
+                scan_timeout=0.1,
+                timeout=2.0,
+                max_enlist=1,
+                run_proof=True,
+                request_id="autonomic-activation-test",
+            )
+        finally:
+            alpha.mesh.suggest_local_scan_urls = original
+
+        self.assertIn(result["status"], {"completed", "partial"})
+        self.assertGreaterEqual(result["routes"]["healthy"], 1)
+        self.assertTrue(any(action["kind"] == "route_probe" for action in result["actions"]))
+        self.assertTrue(any(action["kind"] == "whole_mesh_proof" for action in result["actions"]))
+        self.assertTrue(result["helpers"]["enlisted"])
+        self.assertEqual(alpha.mesh.autonomy.latest_run()["request_id"], "autonomic-activation-test")
+
+    def test_autonomic_activation_reuses_duplicate_request_id(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        _, beta_base_url = self.serve_mesh(beta)
+        original = alpha.mesh.suggest_local_scan_urls
+        alpha.mesh.suggest_local_scan_urls = lambda **_: [beta_base_url]
+        try:
+            first = alpha.mesh.activate_autonomic_mesh(
+                limit=12,
+                scan_timeout=0.1,
+                timeout=2.0,
+                max_enlist=1,
+                run_proof=False,
+                request_id="autonomic-duplicate-request",
+            )
+            second = alpha.mesh.activate_autonomic_mesh(
+                limit=12,
+                scan_timeout=0.1,
+                timeout=2.0,
+                max_enlist=1,
+                run_proof=False,
+                request_id="autonomic-duplicate-request",
+            )
+        finally:
+            alpha.mesh.suggest_local_scan_urls = original
+
+        self.assertTrue(second["deduped"])
+        self.assertEqual(first["run"]["id"], second["run"]["id"])
+        self.assertEqual(second["request_id"], "autonomic-duplicate-request")
+
+    def test_autonomic_activation_does_not_enlist_candidate_with_failed_route(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        self._register_default_worker(beta, worker_id="beta-route-failed-worker")
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_device(base_url=beta_base_url, trust_tier="trusted")
+        alpha.mesh._update_peer_record(
+            "beta-node",
+            metadata={
+                "last_reachable_base_url": beta_base_url,
+                "route_health": {
+                    "status": "unreachable",
+                    "best_route": beta_base_url,
+                    "checked_at": "2026-04-22T00:00:00Z",
+                    "last_error": "timed out",
+                    "freshness": "failed",
+                    "failure_count": 1,
+                },
+            },
+        )
+        original_scan = alpha.mesh.suggest_local_scan_urls
+        original_probe = alpha.mesh.autonomy.probe_routes
+        alpha.mesh.suggest_local_scan_urls = lambda **_: []
+        alpha.mesh.autonomy.probe_routes = lambda **_: {
+            "status": "attention_needed",
+            "peer_id": "beta-node",
+            "checked": 1,
+            "reachable": 0,
+            "best_route": "",
+            "candidates": [],
+            "operator_summary": "No working route found for beta-node.",
+        }
+        try:
+            result = alpha.mesh.activate_autonomic_mesh(
+                limit=12,
+                scan_timeout=0.1,
+                timeout=0.2,
+                max_enlist=1,
+                run_proof=False,
+                request_id="autonomic-failed-route-helper-test",
+            )
+        finally:
+            alpha.mesh.suggest_local_scan_urls = original_scan
+            alpha.mesh.autonomy.probe_routes = original_probe
+
+        self.assertFalse(result["helpers"]["enlisted"])
+        self.assertTrue(any(item["reason"] == "route_not_usable" for item in result["helpers"]["skipped"]))
+
+    def test_autonomic_partner_helper_requires_approval_and_rejection_learns_deny(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_device(base_url=beta_base_url, trust_tier="partner")
+        original = alpha.mesh.suggest_local_scan_urls
+        alpha.mesh.suggest_local_scan_urls = lambda **_: [beta_base_url]
+        try:
+            result = alpha.mesh.activate_autonomic_mesh(
+                limit=12,
+                scan_timeout=0.1,
+                timeout=2.0,
+                max_enlist=1,
+                run_proof=False,
+                request_id="autonomic-partner-approval-test",
+            )
+        finally:
+            alpha.mesh.suggest_local_scan_urls = original
+
+        self.assertEqual(result["status"], "approval_requested")
+        approval = result["approvals"][0]["approval"]
+        rejected = alpha.mesh.resolve_approval(
+            approval["id"],
+            decision="rejected",
+            operator_peer_id="alpha-node",
+            operator_agent_id="test-ui",
+            reason="test reject",
+        )
+        self.assertEqual(rejected["status"], "rejected")
+        preferences = alpha.mesh.list_offload_preferences(peer_id="beta-node", workload_class="connectivity_test")
+        self.assertEqual(preferences["preferences"][0]["preference"], "deny")
+
+    def test_autonomic_route_repair_retries_transport_timeout_once(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        _, beta_base_url = self.serve_mesh(beta)
+        alpha.mesh.connect_device(base_url=beta_base_url, trust_tier="trusted")
+        calls = {"proof": 0, "probe": 0, "sync": 0}
+        original_launch = alpha.mesh.launch_mesh_test_mission
+        original_probe = alpha.mesh.autonomy.probe_routes
+        original_sync = alpha.mesh.sync_peer
+        original_scan = alpha.mesh.suggest_local_scan_urls
+
+        def fake_launch(**kwargs):
+            calls["proof"] += 1
+            if calls["proof"] == 1:
+                return {
+                    "status": "ok",
+                    "mission": {"id": "failed-proof", "status": "failed", "metadata": {"launch_error": "<urlopen error timed out>"}},
+                }
+            return {"status": "ok", "mission": {"id": "repaired-proof", "status": "completed", "metadata": {}}}
+
+        def fake_probe(**kwargs):
+            calls["probe"] += 1
+            return {
+                "status": "ok",
+                "peer_id": kwargs.get("peer_id") or "beta-node",
+                "checked": 1,
+                "reachable": 1,
+                "best_route": beta_base_url,
+                "candidates": [],
+                "operator_summary": "Beta is reachable after repair.",
+            }
+
+        def fake_sync(*args, **kwargs):
+            calls["sync"] += 1
+            return {"status": "ok", "peer_id": args[0] if args else kwargs.get("peer_id", "beta-node")}
+
+        alpha.mesh.launch_mesh_test_mission = fake_launch
+        alpha.mesh.autonomy.probe_routes = fake_probe
+        alpha.mesh.sync_peer = fake_sync
+        alpha.mesh.suggest_local_scan_urls = lambda **_: [beta_base_url]
+        try:
+            result = alpha.mesh.activate_autonomic_mesh(
+                limit=12,
+                timeout=2.0,
+                max_enlist=0,
+                run_proof=True,
+                repair=True,
+                request_id="autonomic-repair-test",
+            )
+        finally:
+            alpha.mesh.launch_mesh_test_mission = original_launch
+            alpha.mesh.autonomy.probe_routes = original_probe
+            alpha.mesh.sync_peer = original_sync
+            alpha.mesh.suggest_local_scan_urls = original_scan
+
+        self.assertEqual(calls["proof"], 2)
+        self.assertGreaterEqual(calls["probe"], 1)
+        self.assertGreaterEqual(calls["sync"], 1)
+        self.assertTrue(any(action["kind"] == "whole_mesh_proof_retry" for action in result["actions"]))
+
+    def test_server_autonomic_mesh_handlers_round_trip(self):
+        alpha = self.make_stack("alpha")
+        beta = self.make_stack("beta")
+        _, beta_base_url = self.serve_mesh(beta)
+        server.server_context["mesh"] = alpha.mesh
+        alpha.mesh.connect_device(base_url=beta_base_url, trust_tier="trusted")
+
+        probe = ProbeHandler()
+        probe._handle_mesh_routes_probe({"peer_id": "beta-node", "timeout": 2.0})
+        self.assertEqual(probe.code, 200)
+        self.assertEqual(probe.payload["status"], "ok")
+        self.assertEqual(probe.payload["best_route"], beta_base_url)
+
+        probe = ProbeHandler()
+        probe._handle_mesh_routes_health()
+        self.assertEqual(probe.code, 200)
+        self.assertGreaterEqual(probe.payload["healthy"], 1)
+
+        probe = ProbeHandler()
+        probe._handle_mesh_autonomy_status()
+        self.assertEqual(probe.code, 200)
+        self.assertIn("operator_summary", probe.payload)
+
+        probe = ProbeHandler()
+        original = alpha.mesh.suggest_local_scan_urls
+        alpha.mesh.suggest_local_scan_urls = lambda **_: [beta_base_url]
+        try:
+            probe._handle_mesh_autonomy_activate({"run_proof": False, "max_enlist": 1, "request_id": "autonomic-handler-test"})
+            self.assertEqual(probe.code, 200)
+            self.assertIn(probe.payload["status"], {"completed", "partial"})
+        finally:
+            alpha.mesh.suggest_local_scan_urls = original
 
     def test_server_connect_module_exposes_easy_and_connect_surface(self):
         alpha = self.make_stack("alpha")
@@ -5474,6 +5980,9 @@ class SovereignMeshTests(unittest.TestCase):
             def _handle_mesh_contract(self):
                 self.calls.append(("contract",))
 
+            def _handle_mesh_app_status(self):
+                self.calls.append(("app_status",))
+
             def _handle_mesh_manifest(self):
                 self.calls.append(("manifest",))
 
@@ -5505,6 +6014,11 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(server_routes.resolve_get_route("/app.webmanifest").handler_name, "_handle_app_manifest")
         self.assertEqual(server_routes.resolve_get_route("/easy").handler_name, "_handle_easy_page")
         self.assertEqual(server_routes.resolve_get_route("/mesh/contract").handler_name, "_handle_mesh_contract")
+        self.assertEqual(server_routes.resolve_get_route("/mesh/app/status").handler_name, "_handle_mesh_app_status")
+        self.assertEqual(server_routes.resolve_get_route("/mesh/autonomy/status").handler_name, "_handle_mesh_autonomy_status")
+        self.assertEqual(server_routes.resolve_get_route("/mesh/routes/health").handler_name, "_handle_mesh_routes_health")
+        self.assertEqual(server_routes.resolve_post_route("/mesh/autonomy/activate").handler_name, "_handle_mesh_autonomy_activate")
+        self.assertEqual(server_routes.resolve_post_route("/mesh/routes/probe").handler_name, "_handle_mesh_routes_probe")
         self.assertEqual(
             server_routes.resolve_post_route("/mesh/notifications/n-1/ack").handler_name,
             "_handle_mesh_notification_ack",
@@ -5516,6 +6030,7 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertTrue(server_routes.dispatch_get(probe, "/easy", {}))
         self.assertTrue(server_routes.dispatch_get(probe, "/mesh/control/stream", {"since": ["4"]}))
         self.assertTrue(server_routes.dispatch_get(probe, "/mesh/contract", {}))
+        self.assertTrue(server_routes.dispatch_get(probe, "/mesh/app/status", {}))
         self.assertTrue(server_routes.dispatch_get(probe, "/mesh/manifest", {}))
         self.assertTrue(server_routes.dispatch_get(probe, "/mesh/missions/mission-1/continuity", {}))
         self.assertTrue(server_routes.dispatch_get(probe, "/mesh/missions/mission-1", {}))
@@ -5534,6 +6049,7 @@ class SovereignMeshTests(unittest.TestCase):
                 ("easy",),
                 ("control_stream", {"since": ["4"]}),
                 ("contract",),
+                ("app_status",),
                 ("manifest",),
                 ("mission_continuity", "/mesh/missions/mission-1/continuity"),
                 ("mission_get", "/mesh/missions/mission-1"),
@@ -5575,12 +6091,21 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("ArtifactDescriptor", snapshot["schemas"])
         self.assertIn("MissionContinuitySummary", snapshot["schemas"])
         self.assertIn("TreatyAudit", snapshot["schemas"])
+        self.assertIn("AutonomicActivateRequest", snapshot["schemas"])
+        self.assertIn("AutonomicRun", snapshot["schemas"])
+        self.assertIn("RouteHealth", snapshot["schemas"])
+        self.assertIn("AppStatus", snapshot["schemas"])
         self.assertIn("ProtocolConformanceSnapshot", snapshot["schemas"])
         self.assertIn("runtime", snapshot["groups"])
         self.assertIn("missions", snapshot["groups"])
         self.assertIn("ops", snapshot["groups"])
         self.assertIn("artifacts", snapshot["groups"])
         self.assertIn("get:/mesh/contract", endpoint_ids)
+        self.assertIn("get:/mesh/app/status", endpoint_ids)
+        self.assertIn("get:/mesh/autonomy/status", endpoint_ids)
+        self.assertIn("get:/mesh/routes/health", endpoint_ids)
+        self.assertIn("post:/mesh/autonomy/activate", endpoint_ids)
+        self.assertIn("post:/mesh/routes/probe", endpoint_ids)
         self.assertIn("get:/mesh/missions/{mission_id}/continuity", endpoint_ids)
         self.assertIn("post:/mesh/jobs/{job_id}/resume-from-checkpoint", endpoint_ids)
         self.assertIn("post:/mesh/notifications/{notification_id}/ack", endpoint_ids)
@@ -5592,12 +6117,30 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertTrue(mission_continuity["response"]["schema_available"])
 
         queue_events = server_contract.contract_for("GET", "/mesh/queue/events")
+        self.assertEqual(queue_events["request"]["query"]["since"], "integer")
         self.assertEqual(queue_events["request"]["query"]["since_seq"], "integer")
         self.assertEqual(queue_events["response"]["schema_ref"], "QueueEventList")
+
+        ack_deadline = server_contract.contract_for("POST", "/mesh/queue/ack-deadline")
+        self.assertEqual(ack_deadline["request"]["body"]["ttl_seconds"], "integer")
+        self.assertEqual(ack_deadline["request"]["body"]["ack_deadline_seconds"], "integer")
 
         manifest_contract = server_contract.contract_for("GET", "/mesh/manifest")
         self.assertEqual(manifest_contract["response"]["schema_ref"], "MeshManifest")
         self.assertTrue(manifest_contract["response"]["schema_available"])
+
+        app_status_contract = server_contract.contract_for("GET", "/mesh/app/status")
+        self.assertEqual(app_status_contract["response"]["schema_ref"], "AppStatus")
+        self.assertTrue(app_status_contract["response"]["schema_available"])
+
+        activate_contract = server_contract.contract_for("POST", "/mesh/autonomy/activate")
+        self.assertEqual(activate_contract["request"]["schema_ref"], "AutonomicActivateRequest")
+        self.assertEqual(activate_contract["response"]["schema_ref"], "AutonomicRun")
+        self.assertTrue(activate_contract["response"]["schema_available"])
+
+        routes_contract = server_contract.contract_for("GET", "/mesh/routes/health")
+        self.assertEqual(routes_contract["response"]["schema_ref"], "RouteHealthList")
+        self.assertTrue(routes_contract["response"]["schema_available"])
 
         handshake_contract = server_contract.contract_for("POST", "/mesh/handshake")
         self.assertEqual(handshake_contract["request"]["schema_ref"], "SignedEnvelope")
@@ -5617,11 +6160,14 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("protocol_version", manifest_schema["required"])
         self.assertIn("organism_card", manifest_schema["properties"])
         self.assertIn("TreatyAudit", list_protocol_schemas())
+        self.assertIn("AutonomicMeshStatus", list_protocol_schemas())
+        self.assertIn("AppStatus", list_protocol_schemas())
+        self.assertIn("RouteProbeResult", list_protocol_schemas())
         self.assertIn("ProtocolConformanceSnapshot", list_protocol_schemas())
 
         conformance = snapshot["conformance"]
         self.assertEqual(conformance["status"], "ok")
-        self.assertGreaterEqual(conformance["fixture_count"], 6)
+        self.assertGreaterEqual(conformance["fixture_count"], 8)
         self.assertEqual(conformance["invalid_fixture_count"], 0)
         self.assertTrue(all(item["validation"]["status"] == "ok" for item in conformance["fixtures"]))
 
@@ -5632,12 +6178,39 @@ class SovereignMeshTests(unittest.TestCase):
             "signed-envelope-minimal",
             {fixture["id"] for fixture in direct_conformance["fixtures"]},
         )
+        self.assertIn(
+            "autonomic-activate-request",
+            {fixture["id"] for fixture in direct_conformance["fixtures"]},
+        )
+        self.assertIn(
+            "app-status-operator-home",
+            {fixture["id"] for fixture in direct_conformance["fixtures"]},
+        )
 
         valid_audit = validate_protocol_object(
             "TreatyAuditRequest",
             {"treaty_requirements": ["treaty/alpha"], "operation": "continuity_export"},
         )
         self.assertEqual(valid_audit["status"], "ok")
+
+        valid_autonomic = validate_protocol_object(
+            "AutonomicActivateRequest",
+            {"mode": "assisted", "run_proof": True, "repair": True},
+        )
+        self.assertEqual(valid_autonomic["status"], "ok")
+
+        valid_app_status = validate_protocol_object(
+            "AppStatus",
+            {
+                "status": "ok",
+                "node": {},
+                "app_urls": {},
+                "mesh_quality": {},
+                "route_health": {"status": "ok", "routes": []},
+                "next_actions": ["Activate Autonomic Mesh."],
+            },
+        )
+        self.assertEqual(valid_app_status["status"], "ok")
 
         invalid_envelope = validate_protocol_object("SignedEnvelope", {"request": {}})
         self.assertEqual(invalid_envelope["status"], "invalid")
@@ -6032,6 +6605,13 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(content_type, "text/html; charset=utf-8")
         self.assertIn("OCP App", markup)
         self.assertIn("One app for the mesh.", markup)
+        self.assertIn("OCP Today", markup)
+        self.assertIn("Activate Autonomic Mesh", markup)
+        self.assertIn("Phone Link + QR", markup)
+        self.assertIn("/mesh/app/status", markup)
+        self.assertIn("ocp_operator_token", markup)
+        self.assertIn("X-OCP-Operator-Token", markup)
+        self.assertIn("if (!response.ok)", markup)
         self.assertIn("OCP Easy Setup", markup)
         self.assertIn("OCP Control Deck", markup)
         self.assertIn("/easy", markup)
@@ -6042,6 +6622,17 @@ class SovereignMeshTests(unittest.TestCase):
             app_markup = response.read().decode("utf-8")
 
         self.assertIn("OCP App", app_markup)
+
+        with urlopen(f"{base_url}/mesh/app/status") as response:
+            app_status = json.loads(response.read().decode("utf-8"))
+
+        self.assertEqual(app_status["status"], "ok")
+        self.assertEqual(app_status["node"]["node_id"], "alpha-node")
+        self.assertIn("mesh_quality", app_status)
+        self.assertIn("route_health", app_status)
+        self.assertIn("latest_proof", app_status)
+        self.assertIn("next_actions", app_status)
+        self.assertIn("/app", app_status["app_urls"]["app_url"])
 
         with urlopen(f"{base_url}/app.webmanifest") as response:
             manifest = json.loads(response.read().decode("utf-8"))
@@ -6063,6 +6654,7 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("Share This Easy Link", easy_markup)
         self.assertIn("Scan This QR Code", easy_markup)
         self.assertIn("qrcode.min.js", easy_markup)
+        self.assertIn("X-OCP-Operator-Token", easy_markup)
         self.assertIn("Open Advanced Deck", easy_markup)
         self.assertIn("beta-node", easy_markup)
 
@@ -6084,6 +6676,184 @@ class SovereignMeshTests(unittest.TestCase):
             start_ocp_easy.share_urls_for_host("172.20.10.11", 8431),
             ["http://172.20.10.11:8431/"],
         )
+
+    def test_startup_helpers_resolve_state_paths_and_server_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp) / "repo"
+            repo_root.mkdir()
+            state_dir = Path(tmp) / "state"
+            profile = ocp_startup.profile_from_values(
+                repo_root,
+                host="0.0.0.0",
+                port=8555,
+                node_id="alpha-node",
+                display_name="Alpha",
+                state_dir=state_dir,
+                create_paths=True,
+            )
+            command = ocp_startup.server_command(profile, repo_root, python_executable="python3")
+
+            self.assertEqual(profile.db_path, state_dir / "ocp.db")
+            self.assertTrue(profile.identity_dir.exists())
+            self.assertTrue(profile.workspace_root.exists())
+            self.assertEqual(command[0], "python3")
+            self.assertIn(str(repo_root / "server.py"), command)
+            self.assertIn("--host", command)
+            self.assertIn("0.0.0.0", command)
+            self.assertIn("--db-path", command)
+            self.assertIn(str(state_dir / "ocp.db"), command)
+            self.assertEqual(ocp_startup.health_url("0.0.0.0", 8555), "http://127.0.0.1:8555/mesh/manifest")
+
+            custom_db = Path(tmp) / "custom" / "demo.db"
+            custom_profile = ocp_startup.profile_from_values(
+                repo_root,
+                db_path=custom_db,
+                node_id="custom-node",
+                create_paths=True,
+            )
+            self.assertEqual(custom_profile.db_path, custom_db)
+            self.assertEqual(custom_profile.identity_dir, custom_db.parent / "identity")
+            self.assertEqual(custom_profile.workspace_root, custom_db.parent / "workspace")
+            self.assertTrue(custom_profile.identity_dir.exists())
+            self.assertTrue(custom_profile.workspace_root.exists())
+
+    def test_desktop_launcher_builds_local_and_mesh_launch_plans(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp) / "repo"
+            repo_root.mkdir()
+            home = Path(tmp) / "home"
+            config = {
+                "port": 8666,
+                "node_id": "desktop-alpha",
+                "display_name": "Desktop Alpha",
+            }
+            local_plan = ocp_launcher.build_launch_plan("local", config, repo_root, home=home)
+            mesh_plan = ocp_launcher.build_launch_plan("mesh", config, repo_root, home=home)
+
+            self.assertEqual(local_plan.profile.host, "127.0.0.1")
+            self.assertEqual(local_plan.app_url, "http://127.0.0.1:8666/")
+            self.assertEqual(local_plan.share_urls, [])
+            self.assertEqual(mesh_plan.profile.host, "0.0.0.0")
+            self.assertIn("--display-name", mesh_plan.command)
+            self.assertIn("Desktop Alpha", mesh_plan.command)
+            self.assertTrue(str(home / "Library" / "Application Support" / "OCP" / "state") in str(mesh_plan.profile.db_path))
+            self.assertEqual(mesh_plan.config_path, ocp_startup.default_launcher_config_path(home=home))
+            self.assertEqual(
+                ocp_launcher.operator_app_url("http://192.168.1.44:8666/", "secret token"),
+                "http://192.168.1.44:8666/app#ocp_operator_token=secret%20token",
+            )
+
+    def test_desktop_launcher_config_round_trips(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "launcher.json"
+            saved = ocp_launcher.save_launcher_config(
+                {"port": "8777", "node_id": "alpha-node", "display_name": "Alpha"},
+                path,
+            )
+            loaded = ocp_launcher.load_launcher_config(path)
+
+            self.assertEqual(saved["port"], 8777)
+            self.assertEqual(loaded["port"], 8777)
+            self.assertEqual(loaded["node_id"], "alpha-node")
+            self.assertEqual(loaded["display_name"], "Alpha")
+            self.assertIn("operator_token", loaded)
+
+    def test_desktop_launcher_close_stops_running_server(self):
+        class FakeProcess:
+            def __init__(self):
+                self.terminated = False
+                self.killed = False
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                self.terminated = True
+
+            def wait(self, timeout=None):
+                return 0
+
+            def kill(self):
+                self.killed = True
+
+        class FakeStatus:
+            def __init__(self):
+                self.value = ""
+
+            def set(self, value):
+                self.value = value
+
+        class FakeRoot:
+            def __init__(self):
+                self.destroyed = False
+
+            def destroy(self):
+                self.destroyed = True
+
+        app = ocp_launcher.OCPLauncherApp.__new__(ocp_launcher.OCPLauncherApp)
+        app.process = FakeProcess()
+        app.status = FakeStatus()
+        app.root = FakeRoot()
+        app.closing = False
+
+        app.close()
+
+        self.assertTrue(app.closing)
+        self.assertTrue(app.process.terminated)
+        self.assertFalse(app.process.killed)
+        self.assertTrue(app.root.destroyed)
+
+    def test_macos_app_builder_creates_unsigned_bundle_and_excludes_local_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp) / "repo"
+            repo_root.mkdir()
+            (repo_root / "server.py").write_text("print('server')\n", encoding="utf-8")
+            (repo_root / "ocp_startup.py").write_text("# startup\n", encoding="utf-8")
+            (repo_root / "ocp_desktop").mkdir()
+            (repo_root / "ocp_desktop" / "__init__.py").write_text("", encoding="utf-8")
+            (repo_root / "ocp_desktop" / "launcher.py").write_text("# launcher\n", encoding="utf-8")
+            (repo_root / ".git").mkdir()
+            (repo_root / ".git" / "config").write_text("secret\n", encoding="utf-8")
+            (repo_root / ".local").mkdir()
+            (repo_root / ".local" / "ocp.db").write_text("db\n", encoding="utf-8")
+            (repo_root / ".mesh-alpha").mkdir()
+            (repo_root / ".mesh-alpha" / "identity").write_text("key\n", encoding="utf-8")
+            (repo_root / ".env").write_text("SECRET=1\n", encoding="utf-8")
+            (repo_root / ".env.local").write_text("SECRET=2\n", encoding="utf-8")
+            (repo_root / "secret.pem").write_text("pem\n", encoding="utf-8")
+            (repo_root / "secret.key").write_text("key\n", encoding="utf-8")
+            (repo_root / "secret.crt").write_text("crt\n", encoding="utf-8")
+            (repo_root / "secret.p12").write_text("p12\n", encoding="utf-8")
+            (repo_root / "secret.der").write_text("der\n", encoding="utf-8")
+            (repo_root / "identity").mkdir()
+            (repo_root / "identity" / "local.key").write_text("identity-key\n", encoding="utf-8")
+            (repo_root / "cache.pyc").write_bytes(b"pyc")
+            dist_dir = Path(tmp) / "dist-out"
+
+            result = ocp_macos_app.build_macos_app(repo_root, dist_dir=dist_dir)
+            app_path = Path(result["app_path"])
+            bundled_repo = Path(result["bundled_repo"])
+            executable = Path(result["executable"])
+            executable_script = executable.read_text(encoding="utf-8")
+
+            self.assertTrue((app_path / "Contents" / "Info.plist").exists())
+            self.assertTrue(executable.exists())
+            self.assertTrue(os.access(executable, os.X_OK))
+            self.assertIn("cd \"$REPO_ROOT\"", executable_script)
+            self.assertIn("-m ocp_desktop.launcher", executable_script)
+            self.assertTrue((bundled_repo / "server.py").exists())
+            self.assertFalse((bundled_repo / ".git").exists())
+            self.assertFalse((bundled_repo / ".local").exists())
+            self.assertFalse((bundled_repo / ".mesh-alpha").exists())
+            self.assertFalse((bundled_repo / ".env").exists())
+            self.assertFalse((bundled_repo / ".env.local").exists())
+            self.assertFalse((bundled_repo / "secret.pem").exists())
+            self.assertFalse((bundled_repo / "secret.key").exists())
+            self.assertFalse((bundled_repo / "secret.crt").exists())
+            self.assertFalse((bundled_repo / "secret.p12").exists())
+            self.assertFalse((bundled_repo / "secret.der").exists())
+            self.assertFalse((bundled_repo / "identity").exists())
+            self.assertFalse((bundled_repo / "cache.pyc").exists())
 
     def test_connectivity_diagnostics_surface_share_urls_and_bind_guidance(self):
         alpha = self.make_stack("alpha")

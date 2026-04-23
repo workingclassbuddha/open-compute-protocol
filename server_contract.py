@@ -36,7 +36,7 @@ PATH_PARAM_BY_PREFIX = {
 
 QUERY_FIELDS: dict[str, dict[str, str]] = {
     "_handle_control_stream": {"since": "integer", "limit": "integer", "once": "boolean"},
-    "_handle_mesh_artifact_get": {"peer_id": "string", "include_content": "boolean"},
+    "_handle_mesh_artifact_get": {"include_content": "boolean"},
     "_handle_mesh_artifact_list": {
         "limit": "integer",
         "artifact_kind": "string",
@@ -68,6 +68,7 @@ QUERY_FIELDS: dict[str, dict[str, str]] = {
     "_handle_mesh_peers": {"limit": "integer"},
     "_handle_mesh_queue": {"limit": "integer", "status": "string"},
     "_handle_mesh_queue_events": {
+        "since": "integer",
         "since_seq": "integer",
         "limit": "integer",
         "queue_message_id": "string",
@@ -82,6 +83,7 @@ QUERY_FIELDS: dict[str, dict[str, str]] = {
 
 
 BODY_FIELDS: dict[str, dict[str, str]] = {
+    "_handle_mesh_autonomy_activate": {"mode": "string", "run_proof": "boolean", "repair": "boolean", "limit": "integer"},
     "_handle_mesh_approval_request": {"title": "string", "summary": "string", "metadata": "object"},
     "_handle_mesh_approval_resolve": {"decision": "string", "operator_peer_id": "string", "metadata": "object"},
     "_handle_mesh_artifact_pin": {"artifact_id": "string", "pinned": "boolean", "reason": "string"},
@@ -137,8 +139,13 @@ BODY_FIELDS: dict[str, dict[str, str]] = {
     "_handle_mesh_peers_connect": {"base_url": "string", "peer_id": "string", "trust_tier": "string"},
     "_handle_mesh_peers_connect_all": {"limit": "integer", "trust_tier": "string", "refresh_manifest": "boolean"},
     "_handle_mesh_peers_sync": {"peer_id": "string", "limit": "integer", "refresh_manifest": "boolean"},
-    "_handle_mesh_queue_ack_deadline": {"queue_message_id": "string", "ack_deadline_seconds": "integer"},
+    "_handle_mesh_queue_ack_deadline": {
+        "queue_message_id": "string",
+        "ttl_seconds": "integer",
+        "ack_deadline_seconds": "integer",
+    },
     "_handle_mesh_queue_replay": {"queue_message_id": "string", "reason": "string"},
+    "_handle_mesh_routes_probe": {"peer_id": "string", "base_url": "string", "timeout": "number", "limit": "integer"},
     "_handle_mesh_secret_put": {"name": "string", "scope": "string", "value": "string", "metadata": "object"},
     "_handle_mesh_treaty_audit": {"treaty_requirements": "array", "operation": "string", "metadata": "object"},
     "_handle_mesh_treaty_propose": {"treaty_id": "string", "title": "string", "summary": "string", "treaty_type": "string"},
@@ -152,17 +159,20 @@ BODY_FIELDS: dict[str, dict[str, str]] = {
 
 REQUEST_REFS: dict[str, str] = {
     "_handle_mesh_artifact_publish": "SignedEnvelope",
+    "_handle_mesh_autonomy_activate": "AutonomicActivateRequest",
     "_handle_mesh_continuity_restore_plan": "ContinuityRestorePlanRequest",
     "_handle_mesh_handoff": "SignedEnvelope",
     "_handle_mesh_handshake": "SignedEnvelope",
     "_handle_mesh_job_submit": "SignedEnvelope",
     "_handle_mesh_mission_continuity_export": "ContinuityVesselExportRequest",
+    "_handle_mesh_routes_probe": "RouteProbeRequest",
     "_handle_mesh_treaty_audit": "TreatyAuditRequest",
 }
 
 
 RESPONSE_REFS: dict[str, str] = {
     "_handle_control_stream": "ControlStreamSSE",
+    "_handle_mesh_app_status": "AppStatus",
     "_handle_mesh_contract": "ContractSnapshot",
     "_handle_mesh_artifact_get": "Artifact",
     "_handle_mesh_artifact_list": "ArtifactList",
@@ -172,6 +182,8 @@ RESPONSE_REFS: dict[str, str] = {
     "_handle_mesh_artifact_replicate": "ArtifactReplicationResponse",
     "_handle_mesh_artifact_replicate_graph": "ArtifactGraphReplicationResponse",
     "_handle_mesh_artifact_verify_mirror": "ArtifactMirrorVerification",
+    "_handle_mesh_autonomy_activate": "AutonomicRun",
+    "_handle_mesh_autonomy_status": "AutonomicMeshStatus",
     "_handle_mesh_approvals": "ApprovalList",
     "_handle_mesh_cooperative_task_get": "CooperativeTask",
     "_handle_mesh_cooperative_tasks": "CooperativeTaskList",
@@ -195,6 +207,8 @@ RESPONSE_REFS: dict[str, str] = {
     "_handle_mesh_queue": "QueueMessageList",
     "_handle_mesh_queue_events": "QueueEventList",
     "_handle_mesh_queue_metrics": "QueueMetrics",
+    "_handle_mesh_routes_health": "RouteHealthList",
+    "_handle_mesh_routes_probe": "RouteProbeResult",
     "_handle_mesh_scheduler_decisions": "SchedulerDecisionList",
     "_handle_mesh_secrets": "SecretList",
     "_handle_mesh_stream": "EventStreamSnapshot",

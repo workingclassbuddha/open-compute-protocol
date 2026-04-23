@@ -99,7 +99,7 @@ Core abstractions:
 
 Near-term implementation:
 
-- move from dependency-free Schnorr-style signing to Ed25519
+- continue hardening dependency-free Ed25519 signing with key rotation and signature agility
 - keep nonce replay tables and signed envelopes
 - support pinned peer keys and future multi-key rotation records
 

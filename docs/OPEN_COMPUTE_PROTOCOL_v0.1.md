@@ -103,7 +103,7 @@ All mutable OCP requests are carried in a signed envelope:
     "protocol_release": "0.1",
     "implementation": "Sovereign Mesh",
     "protocol_version": "sovereign-mesh/v1",
-    "signature_scheme": "schnorr-sha256-modp1024-v1",
+    "signature_scheme": "ed25519-sha512-v1",
     "signature": "..."
   },
   "body": {
@@ -150,6 +150,11 @@ The current reference implementation exposes the protocol under `/mesh/*`.
 | `/mesh/artifacts/publish` | POST | Publish artifact |
 | `/mesh/artifacts/{artifact_id}` | GET | Fetch artifact subject to policy |
 | `/mesh/agents/handoff` | POST | Send explicit delegation packet |
+| `/mesh/app/status` | GET | Operator/app-facing status projection |
+| `/mesh/autonomy/status` | GET | Current Autonomic Mesh posture |
+| `/mesh/autonomy/activate` | POST | Assisted discovery, route probing, helper planning, and proof activation |
+| `/mesh/routes/health` | GET | Known route-candidate health projection |
+| `/mesh/routes/probe` | POST | Probe and refresh reachable peer routes |
 
 ## Execution Lifecycle
 
@@ -197,14 +202,15 @@ It does not include:
 
 The working implementation in this repo intentionally stays pragmatic:
 
-- signature scheme is currently dependency-free Schnorr-style signing, not Ed25519
+- signature scheme is currently dependency-free Ed25519 signing under `ed25519-sha512-v1`
 - stream sync is snapshot-and-cursor based, not yet a permanent duplex session manager
 - Golem is treated as a provider lane, not a trust authority
 - the standalone OCP store remains the local source of truth for mesh runtime state
+- app/autonomy routes are operator-facing control surfaces, not consensus or settlement surfaces
 
 ## Planned OCP v0.2 Themes
 
-- standardized Ed25519 signatures
+- signature agility, key rotation, and scoped capability grants
 - true duplex federation sessions
 - background sync daemon
 - richer executor and scheduling metadata

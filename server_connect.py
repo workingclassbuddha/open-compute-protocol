@@ -596,10 +596,58 @@ EASY_PAGE_TEMPLATE = """<!doctype html>
 
   <script>
     const OCP_EASY_BOOTSTRAP = __OCP_EASY_BOOTSTRAP__;
+    const OCP_OPERATOR_TOKEN_KEY = "ocp_operator_token";
     const easyApp = {
       state: OCP_EASY_BOOTSTRAP,
       refreshTimer: null
     };
+
+    function consumeOperatorToken() {
+      const hash = String(window.location.hash || "");
+      let token = "";
+      if (hash.indexOf("#ocp_operator_token=") === 0) {
+        token = decodeURIComponent(hash.slice("#ocp_operator_token=".length));
+      } else if (hash.indexOf("ocp_operator_token=") !== -1) {
+        token = new URLSearchParams(hash.replace(/^#/, "")).get("ocp_operator_token") || "";
+      }
+      if (token) {
+        try {
+          window.localStorage.setItem(OCP_OPERATOR_TOKEN_KEY, token);
+        } catch (error) {
+        }
+        history.replaceState(null, "", window.location.pathname + window.location.search);
+      }
+    }
+
+    function operatorToken() {
+      try {
+        return String(window.localStorage.getItem(OCP_OPERATOR_TOKEN_KEY) || "").trim();
+      } catch (error) {
+        return "";
+      }
+    }
+
+    function withOperatorAuth(options) {
+      const next = Object.assign({}, options || {});
+      const headers = new Headers(next.headers || {});
+      const token = operatorToken();
+      if (token && !headers.has("X-OCP-Operator-Token")) {
+        headers.set("X-OCP-Operator-Token", token);
+      }
+      next.headers = headers;
+      return next;
+    }
+
+    function withOperatorFragment(url) {
+      const token = operatorToken();
+      const target = String(url || "");
+      if (!token || !target) {
+        return target;
+      }
+      return target.replace(/#.*$/, "") + "#ocp_operator_token=" + encodeURIComponent(token);
+    }
+
+    consumeOperatorToken();
 
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, function (token) {
@@ -660,7 +708,7 @@ EASY_PAGE_TEMPLATE = """<!doctype html>
     }
 
     async function fetchJson(url, options) {
-      const response = await fetch(url, options);
+      const response = await fetch(url, withOperatorAuth(options));
       if (!response.ok) {
         let detail = response.statusText || "request failed";
         try {
@@ -774,9 +822,9 @@ EASY_PAGE_TEMPLATE = """<!doctype html>
       const peers = ((state.peers || {}).peers) || [];
       const candidates = ((state.discovery_candidates || {}).candidates) || [];
       const connectivity = state.connectivity || {};
-      const shareUrlValue = easyRootUrl(connectivity.share_url || connectivity.base_url);
+      const shareUrlValue = withOperatorFragment(easyRootUrl(connectivity.share_url || connectivity.base_url));
       const lanUrls = (connectivity.lan_urls || []).map(function (item) {
-        return easyRootUrl(item);
+        return withOperatorFragment(easyRootUrl(item));
       });
       const localSummary = document.getElementById("easy-local-summary");
       const localAddresses = document.getElementById("easy-addresses");
@@ -1006,7 +1054,7 @@ EASY_PAGE_TEMPLATE = """<!doctype html>
       });
       document.getElementById("copy-share-url").addEventListener("click", function () {
         const connectivity = (easyApp.state || {}).connectivity || {};
-        copyText(easyRootUrl(connectivity.base_url)).then(function () {
+        copyText(withOperatorFragment(easyRootUrl(connectivity.base_url))).then(function () {
           setStatus("Copied this computer's easy link.");
         }).catch(function (error) {
           setStatus("Copy failed: " + error.message);

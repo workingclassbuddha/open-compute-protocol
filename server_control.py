@@ -77,6 +77,16 @@ def build_control_state(mesh: SovereignMesh) -> dict[str, Any]:
     except Exception:
         autonomy = {"decision": "noop", "policy": {}, "pressure": pressure, "reasons": []}
     try:
+        autonomic_mesh = dict(mesh.autonomy_status() or {})
+    except Exception as exc:
+        autonomic_mesh = {
+            "status": "error",
+            "mode": "assisted",
+            "operator_summary": f"Autonomic Mesh status unavailable: {exc}",
+            "routes": {"routes": [], "count": 0, "healthy": 0},
+            "recommended_actions": [],
+        }
+    try:
         preference_snapshot = dict(mesh.list_offload_preferences(limit=6) or {})
     except Exception:
         preference_snapshot = {"preferences": []}
@@ -110,6 +120,7 @@ def build_control_state(mesh: SovereignMesh) -> dict[str, Any]:
         "connectivity": connectivity,
         "cooperative_tasks": coop_snapshot,
         "autonomy": autonomy,
+        "autonomic_mesh": autonomic_mesh,
         "preferences": preference_snapshot,
         "jobs": jobs_by_id,
         "control_stream": {

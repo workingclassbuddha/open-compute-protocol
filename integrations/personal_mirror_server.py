@@ -803,6 +803,15 @@ _PROTECTED_POST_PATHS = {
     "/mesh/peers/sync",
 }
 
+_SIGNED_MESH_POST_PATHS = {
+    "/mesh/handshake",
+    "/mesh/jobs/submit",
+    "/mesh/artifacts/publish",
+    "/mesh/agents/handoff",
+}
+
+_PROTECTED_MESH_ARTIFACT_CONTENT_PATH = "/mesh/artifacts/content"
+
 
 def _is_client_disconnect(exc: BaseException) -> bool:
     if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
@@ -844,8 +853,10 @@ def _route_requires_agent_auth(method: str, path: str) -> bool:
     route_method = (method or "").strip().upper()
     route_path = (path or "").strip()
     if route_method == "GET":
-        return route_path in _PROTECTED_GET_PATHS
+        return route_path in _PROTECTED_GET_PATHS or route_path == _PROTECTED_MESH_ARTIFACT_CONTENT_PATH
     if route_method == "POST":
+        if route_path.startswith("/mesh/") and route_path not in _SIGNED_MESH_POST_PATHS:
+            return True
         return route_path in _PROTECTED_POST_PATHS
     return False
 
@@ -4678,9 +4689,23 @@ class MirrorHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "artifact id is required"}, 400)
                 return
             artifact_id = path[len(prefix):].strip("/")
-            requester_peer_id = params.get("peer_id", [""])[0]
             include_content = params.get("include_content", ["1"])[0].strip() != "0"
-            self._send_json(mesh.get_artifact(artifact_id, requester_peer_id=requester_peer_id, include_content=include_content))
+            if include_content:
+                metadata = mesh.get_artifact(artifact_id, include_content=False)
+                is_public = mesh._policy_allows_peer(dict(metadata.get("policy") or {}), None)
+                client_host = self.client_address[0] if getattr(self, "client_address", None) else None
+                if not is_public and not _is_authorized_agent_request(
+                    "GET",
+                    _PROTECTED_MESH_ARTIFACT_CONTENT_PATH,
+                    self.headers,
+                    client_host,
+                ):
+                    self._send_json(
+                        _authorization_failure_payload("GET", path, client_host),
+                        401,
+                    )
+                    return
+            self._send_json(mesh.get_artifact(artifact_id, requester_peer_id="", include_content=include_content))
         except Exception as e:
             self._send_json({"error": str(e)}, 404 if "not found" in str(e).lower() else 400)
 

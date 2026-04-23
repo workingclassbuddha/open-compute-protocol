@@ -10,8 +10,8 @@
 
 **A sovereign, local-first compute fabric for trusted devices.**
 
-[![Tests](https://img.shields.io/badge/tests-160%20passing-00FF88?style=flat-square&labelColor=06090F)](./tests/test_sovereign_mesh.py)
-[![Release](https://img.shields.io/badge/release-v0.1.3-F6C177?style=flat-square&labelColor=06090F)](./README.md#current-status)
+[![Tests](https://img.shields.io/badge/tests-185%20passing-00FF88?style=flat-square&labelColor=06090F)](./tests/test_sovereign_mesh.py)
+[![Release](https://img.shields.io/badge/release-v0.1.4-F6C177?style=flat-square&labelColor=06090F)](./README.md#current-status)
 [![Version](https://img.shields.io/badge/wire%20version-sovereign--mesh%2Fv1-00D4FF?style=flat-square&labelColor=06090F)](./docs/OCP_STATUS.md)
 [![Status](https://img.shields.io/badge/status-active%20development-C8A96E?style=flat-square&labelColor=06090F)](./docs/OCP_MASTER_PLAN.md)
 [![Protocol](https://img.shields.io/badge/protocol-OCP%20v0.1-7BC6FF?style=flat-square&labelColor=06090F)](./docs/OCP_STATUS.md)
@@ -131,7 +131,7 @@ Some devices are powerful. Some are private. Some are fragile. Some are approval
 | `server_control_page.py` | Extracted control-deck renderer for the advanced operator surface |
 | `server_http_handlers.py` | Grouped HTTP route handlers so `server.py` stays a thin transport host |
 | `docs/` | Protocol notes, status, and roadmap |
-| `tests/test_sovereign_mesh.py` | Regression suite — 160 tests |
+| `tests/test_sovereign_mesh.py` | Regression suite — 185 tests |
 
 **Key runtime concepts:**
 
@@ -205,8 +205,28 @@ For a fuller walkthrough, see [docs/QUICKSTART.md](./docs/QUICKSTART.md).
 
 OCP ships a built-in one-app surface at `GET /` and `GET /app`. It is designed for phone browsers and can be added to the home screen as a local-first operator app.
 
+Mac beta desktop launcher:
+
+```bash
+python3 -m ocp_desktop.launcher
+```
+
+The launcher keeps state under `~/Library/Application Support/OCP/`, can start a local-only node or LAN-reachable Mesh Mode node, opens the OCP app, and shows the phone link for testing on the same Wi-Fi.
+
+Unsigned macOS beta bundle:
+
+```bash
+python3 scripts/build_macos_app.py
+open dist/OCP.app
+```
+
+The beta `.app` requires `python3` to be installed on the Mac. It excludes local state, identities, databases, `.git`, caches, and test artifacts from the bundle.
+
+When Mesh Mode is started from the desktop launcher, copied phone links include an operator token in the URL fragment and the browser stores it locally for OCP POST actions. If you start the server manually with `OCP_HOST=0.0.0.0`, set `OCP_OPERATOR_TOKEN` and open `http://HOST_IP:8421/app#ocp_operator_token=YOUR_TOKEN` from the phone.
+
 Inside the app:
 
+- `Today` shows mesh strength, Autonomic Mesh status, latest proof, next actions, and a phone link/QR
 - `Setup` embeds the easy setup flow from `GET /easy`
 - `Control` embeds the advanced control deck from `GET /control`
 - `Protocol` links the live manifest, device profile, and HTTP contract from `/mesh/*`
@@ -262,33 +282,21 @@ python3 -m unittest tests.test_sovereign_mesh
 python3 server.py --help
 ```
 
-Current baseline: **158 tests passing.**
+Current baseline: **185 tests passing.**
 
 ---
 
 ## Current Status
 
-**Released in v0.1.3**
+**Released in v0.1.4**
 
-- protocol-kernel refactor that extracts real subsystem seams for protocol, state, scheduler, execution, artifacts, missions, helpers, and governance
-- `SovereignMesh` retained as the stable façade so routes, persistence, and current behavior stay compatible
-- execution boundary now owns runtime adapters, job submission and acceptance orchestration, and result packaging
-- broad regression suite remains green at 160 passing tests
-- continuity alpha now includes a 7026 vision document plus mission continuity vessel planning, verification, dry-run restore planning, `vessel`/`witness` artifact export, continuity metadata in manifests and mission state, continuity-aware scheduler explanations, additive treaty-aware continuity validation, and treaty posture surfaced in manifests and continuity summaries
-
-**Current main after v0.1.3**
-
-- peer and discovery projections now expose treaty compatibility and custody-readiness hints
-- connect, sync, and handshake flows return plain-language `operator_summary` and `recommended_action` fields
-- peer lifecycle events and control-stream payloads carry compact treaty advisory state for live operator surfaces
-- mission continuity now recommends treaty/custody-capable restore targets when available
-- unified app shell at `/` and `/app` brings setup, control, and protocol inspection into one phone-friendly surface
-- easy setup and the advanced control deck still surface treaty posture without requiring raw JSON inspection
-- server internals now have grouped route modules, a dedicated `server_control_page.py` renderer, and a `/mesh/contract` snapshot with reusable protocol schemas, conformance fixtures, and lightweight ingress validation for the live HTTP surface
-- `server.py` now delegates grouped route families through `server_http_handlers.py`, keeping the HTTP host thin while preserving the existing route surface
-- treaty-bound artifact replication now enforces active local treaties plus custody-capable remote peers for sealed continuity artifacts
-- the repo now includes `scripts/check_protocol_conformance.py`, and CI runs it before the broader regression suite so protocol drift and package-boundary regressions fail earlier
-- artifact and mission services now rely more directly on their own row mappers instead of routing those conversions back through `SovereignMesh`
+- Autonomic Mesh alpha adds route health, one-button activation, proof repair, helper-safe enlistment, and app-visible summaries.
+- Desktop Alpha RC adds a Mac beta launcher, unsigned `.app` bundle builder, and a polished `/app` Today surface backed by `GET /mesh/app/status`.
+- LAN operator hardening now requires signed peer traffic or operator-token authenticated raw mesh mutations from non-loopback clients.
+- Private artifact content fetches now require operator auth unless the artifact policy is public.
+- Runtime execution now defaults to explicit environment inheritance, with `inherit_env_allowlist` for deliberate host env pass-through.
+- The signed envelope implementation now uses dependency-free Ed25519 helpers under `ed25519-sha512-v1`.
+- The protocol-kernel refactor and mission-continuity/treaty foundation from v0.1.3 remain intact, with the full regression suite green at 185 tests.
 
 **Implemented in the current runtime**
 
@@ -311,7 +319,7 @@ Current baseline: **158 tests passing.**
 ## Current Framing
 
 - `OCP v0.1` — protocol and spec draft
-- `v0.1.3` — current implementation release
+- `v0.1.4` — current implementation release
 - `Sovereign Mesh` — Python-first reference implementation
 - `sovereign-mesh/v1` — current wire version
 
@@ -334,6 +342,7 @@ OCP is already past "protocol sketch" stage. If it keeps going in this direction
 ## Related
 
 - [Status](./docs/OCP_STATUS.md)
+- [v0.1.4 Release Notes](./docs/RELEASE_v0.1.4.md)
 - [7026 Vision](./docs/OCP_7026_VISION.md)
 - [Quickstart](./docs/QUICKSTART.md)
 - [Master Plan](./docs/OCP_MASTER_PLAN.md)

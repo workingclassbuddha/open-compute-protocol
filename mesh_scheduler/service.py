@@ -509,6 +509,95 @@ class MeshSchedulerService:
             reasons.append("execution_class_latency")
         return score, reasons + ["inline_capable"], continuity_alignment
 
+    def _route_health_score(self, peer: dict) -> tuple[int, list[str]]:
+        metadata = dict(peer.get("metadata") or {})
+        route_health = dict(metadata.get("route_health") or {})
+        status = str(route_health.get("status") or "").strip().lower()
+        freshness = str(route_health.get("freshness") or "").strip().lower()
+        failure_count = int(route_health.get("failure_count") or 0)
+        score = 0
+        reasons: list[str] = []
+        if metadata.get("last_reachable_base_url"):
+            score += 45
+            reasons.append("route_last_reachable")
+        if status == "reachable":
+            if freshness == "stale":
+                score -= 60
+                reasons.append("route_probe_stale")
+            elif freshness == "aging":
+                score += 10
+                reasons.append("route_probe_aging")
+            else:
+                score += 30
+                reasons.append("route_probe_reachable")
+        elif status == "unreachable":
+            score -= 180 + min(120, failure_count * 20)
+            reasons.append("route_probe_unreachable")
+            if failure_count:
+                reasons.append(f"route_failure_count={failure_count}")
+        return score, reasons
+
+    def _locality_tokens(self, value) -> set[str]:
+        tokens: set[str] = set()
+
+        def collect(item) -> None:
+            if isinstance(item, dict):
+                for key in ("digest", "artifact_id", "id", "checkpoint_id"):
+                    token = str(item.get(key) or "").strip()
+                    if token:
+                        tokens.add(token)
+                for nested in item.values():
+                    collect(nested)
+            elif isinstance(item, list):
+                for nested in item:
+                    collect(nested)
+            elif isinstance(item, str):
+                token = item.strip()
+                if token.startswith(("sha256:", "artifact-", "checkpoint-")):
+                    tokens.add(token)
+
+        collect(value)
+        return tokens
+
+    def _job_locality_tokens(self, job: dict) -> tuple[set[str], set[str]]:
+        artifact_tokens = self._locality_tokens(job.get("artifact_inputs") or [])
+        metadata = dict(job.get("metadata") or {})
+        artifact_tokens.update(self._locality_tokens(job.get("payload_ref") or {}))
+        artifact_tokens.update(self._locality_tokens(metadata.get("artifact_refs") or []))
+        checkpoint_tokens = set()
+        checkpoint_tokens.update(self._locality_tokens(metadata.get("latest_checkpoint_ref") or {}))
+        checkpoint_tokens.update(self._locality_tokens(metadata.get("resume_checkpoint_ref") or {}))
+        checkpoint_tokens.update(self._locality_tokens(dict(job.get("continuity") or {}).get("latest_checkpoint_ref") or {}))
+        return artifact_tokens, checkpoint_tokens
+
+    def _peer_locality_tokens(self, peer: dict) -> tuple[set[str], set[str]]:
+        metadata = dict(peer.get("metadata") or {})
+        artifact_tokens = set()
+        checkpoint_tokens = set()
+        for key in ("artifact_inventory", "artifact_locality", "cached_artifacts"):
+            artifact_tokens.update(self._locality_tokens(metadata.get(key) or {}))
+        for key in ("checkpoint_inventory", "checkpoint_locality", "cached_checkpoints"):
+            checkpoint_tokens.update(self._locality_tokens(metadata.get(key) or {}))
+        checkpoint_tokens.update(self._locality_tokens(metadata.get("latest_checkpoint_ref") or {}))
+        return artifact_tokens, checkpoint_tokens
+
+    def _locality_score(self, peer: dict, job: dict) -> tuple[int, list[str]]:
+        job_artifacts, job_checkpoints = self._job_locality_tokens(job)
+        if not job_artifacts and not job_checkpoints:
+            return 0, []
+        peer_artifacts, peer_checkpoints = self._peer_locality_tokens(peer)
+        artifact_matches = job_artifacts & peer_artifacts
+        checkpoint_matches = job_checkpoints & (peer_artifacts | peer_checkpoints)
+        score = 0
+        reasons: list[str] = []
+        if artifact_matches:
+            score += min(4, len(artifact_matches)) * 35
+            reasons.append(f"artifact_locality_match={len(artifact_matches)}")
+        if checkpoint_matches:
+            score += min(3, len(checkpoint_matches)) * 80
+            reasons.append(f"checkpoint_locality_match={len(checkpoint_matches)}")
+        return score, reasons
+
     def peer_candidate_score(self, peer: dict, job: dict) -> tuple[int, list[str], dict]:
         requirements = dict(job.get("requirements") or {})
         policy = self.mesh._normalize_policy(job.get("policy") or {})
@@ -582,6 +671,12 @@ class MeshSchedulerService:
         if peer.get("status") == "connected":
             score += 40
             reasons.append("connected")
+        route_score, route_reasons = self._route_health_score(peer)
+        score += route_score
+        reasons.extend(route_reasons)
+        locality_score, locality_reasons = self._locality_score(peer, job)
+        score += locality_score
+        reasons.extend(locality_reasons)
         if peer.get("heartbeat", {}).get("status") == "active":
             score += 30
             reasons.append("active_heartbeat")

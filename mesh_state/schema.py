@@ -308,6 +308,18 @@ CREATE TABLE IF NOT EXISTS mesh_offload_preferences (
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (peer_id, workload_class)
 );
+CREATE TABLE IF NOT EXISTS mesh_autonomy_runs (
+    id TEXT PRIMARY KEY,
+    request_id TEXT UNIQUE,
+    mode TEXT DEFAULT 'assisted',
+    status TEXT DEFAULT 'planned',
+    summary TEXT DEFAULT '',
+    actions TEXT DEFAULT '[]',
+    result TEXT DEFAULT '{}',
+    metadata TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 CREATE INDEX IF NOT EXISTS idx_mesh_events_created ON mesh_events(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mesh_remote_events_peer_created ON mesh_remote_events(peer_id, remote_seq DESC);
 CREATE INDEX IF NOT EXISTS idx_mesh_leases_peer_status ON mesh_leases(peer_id, status);
@@ -326,6 +338,7 @@ CREATE INDEX IF NOT EXISTS idx_mesh_queue_messages_status ON mesh_queue_messages
 CREATE INDEX IF NOT EXISTS idx_mesh_queue_messages_dedupe ON mesh_queue_messages(dedupe_key, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mesh_scheduler_decisions_created ON mesh_scheduler_decisions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mesh_offload_preferences_updated ON mesh_offload_preferences(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mesh_autonomy_runs_created ON mesh_autonomy_runs(created_at DESC);
 """
 
 

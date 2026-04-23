@@ -4,103 +4,49 @@
 from __future__ import annotations
 
 import argparse
-import ipaddress
 import os
-import socket
 import subprocess
 import sys
-import time
-import urllib.error
-import urllib.request
 import webbrowser
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+import ocp_startup
+
 
 def slugify(value: str) -> str:
-    chars = []
-    last_dash = False
-    for ch in (value or "").lower():
-        if ch.isalnum():
-            chars.append(ch)
-            last_dash = False
-            continue
-        if not last_dash:
-            chars.append("-")
-            last_dash = True
-    return "".join(chars).strip("-")
+    return ocp_startup.slugify(value)
 
 
 def default_node_id() -> str:
-    host_name = os.uname().nodename if hasattr(os, "uname") else os.environ.get("COMPUTERNAME", "ocp")
-    token = slugify(host_name) or "ocp"
-    return f"{token}-node"
+    return ocp_startup.default_node_id()
 
 
 def display_host_for_browser(host: str) -> str:
-    if host in {"0.0.0.0", "::", ""}:
-        return "127.0.0.1"
-    return host
+    return ocp_startup.display_host_for_browser(host)
 
 
 def is_wildcard_host(host: str) -> bool:
-    return str(host or "").strip().lower() in {"", "0.0.0.0", "::", "[::]"}
+    return ocp_startup.is_wildcard_host(host)
 
 
 def is_loopback_host(host: str) -> bool:
-    token = str(host or "").strip().lower()
-    return token == "localhost" or token.startswith("127.")
+    return ocp_startup.is_loopback_host(host)
 
 
 def discover_local_ipv4_addresses(*, bind_host: str = "") -> list[str]:
-    seen: set[str] = set()
-    bind_token = str(bind_host or "").strip()
-    if bind_token and not is_wildcard_host(bind_token) and not is_loopback_host(bind_token):
-        try:
-            if ipaddress.ip_address(bind_token).version == 4:
-                seen.add(bind_token)
-        except ValueError:
-            pass
-    try:
-        addrinfo_rows = socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET, socket.SOCK_DGRAM)
-    except OSError:
-        addrinfo_rows = []
-    for family, _, _, _, sockaddr in addrinfo_rows:
-        if family != socket.AF_INET or not sockaddr:
-            continue
-        host = str(sockaddr[0] or "").strip()
-        if host and not is_wildcard_host(host) and not is_loopback_host(host):
-            seen.add(host)
-    for probe_host in ("192.0.2.1", "10.255.255.255"):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-                sock.connect((probe_host, 80))
-                host = str(sock.getsockname()[0] or "").strip()
-                if host and not is_wildcard_host(host) and not is_loopback_host(host):
-                    seen.add(host)
-        except OSError:
-            continue
-    return sorted(
-        (
-            host
-            for host in seen
-            if host and ipaddress.ip_address(host).version == 4
-        ),
-        key=lambda host: (not ipaddress.ip_address(host).is_private, host),
-    )
+    return ocp_startup.discover_local_ipv4_addresses(bind_host=bind_host)
 
 
 def share_urls_for_host(host: str, port: int) -> list[str]:
-    token = str(host or "").strip()
-    if token and not is_wildcard_host(token) and not is_loopback_host(token):
-        return [f"http://{token}:{int(port)}/"]
-    if is_wildcard_host(token):
-        return [f"http://{address}:{int(port)}/" for address in discover_local_ipv4_addresses(bind_host=token)]
-    return []
+    return ocp_startup.share_urls_for_host(host, port, discover_ipv4=discover_local_ipv4_addresses)
 
 
 def build_open_url(host: str, port: int, path: str = "/") -> str:
-    route = path if str(path or "").startswith("/") else f"/{path}"
-    return f"http://{display_host_for_browser(host)}:{int(port)}{route}"
+    return ocp_startup.build_open_url(host, port, path)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -122,59 +68,37 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def wait_for_manifest(host: str, port: int, timeout_seconds: float) -> bool:
-    url = build_open_url(host, port, "/mesh/manifest")
-    deadline = time.time() + max(timeout_seconds, 1.0)
-    while time.time() < deadline:
-        try:
-            with urllib.request.urlopen(url, timeout=1.0) as response:
-                if response.status == 200:
-                    return True
-        except (urllib.error.URLError, OSError):
-            time.sleep(0.35)
-    return False
+    return ocp_startup.wait_for_manifest(host, port, timeout_seconds)
+
+
+def _profile_from_args(args: argparse.Namespace, repo_root: Path) -> ocp_startup.StartupProfile:
+    return ocp_startup.profile_from_values(
+        repo_root,
+        host=args.host,
+        port=args.port,
+        db_path=args.db_path,
+        workspace_root=args.workspace_root,
+        identity_dir=args.identity_dir,
+        node_id=args.node_id,
+        display_name=args.display_name,
+        device_class=args.device_class,
+        form_factor=args.form_factor,
+        base_url=args.base_url,
+        create_paths=True,
+    )
 
 
 def server_command(args: argparse.Namespace, repo_root: Path) -> list[str]:
-    state_dir = Path(args.db_path).parent if args.db_path else (repo_root / ".local" / "ocp")
-    db_path = Path(args.db_path) if args.db_path else (state_dir / "ocp.db")
-    identity_dir = Path(args.identity_dir) if args.identity_dir else (state_dir / "identity")
-    workspace_root = Path(args.workspace_root) if args.workspace_root else (state_dir / "workspace")
-    identity_dir.mkdir(parents=True, exist_ok=True)
-    workspace_root.mkdir(parents=True, exist_ok=True)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    command = [
-        sys.executable,
-        str(repo_root / "server.py"),
-        "--host",
-        args.host,
-        "--port",
-        str(args.port),
-        "--db-path",
-        str(db_path),
-        "--workspace-root",
-        str(workspace_root),
-        "--identity-dir",
-        str(identity_dir),
-        "--node-id",
-        args.node_id,
-        "--display-name",
-        args.display_name,
-        "--device-class",
-        args.device_class,
-        "--form-factor",
-        args.form_factor,
-    ]
-    if args.base_url:
-        command.extend(["--base-url", args.base_url])
-    return command
+    return ocp_startup.server_command(_profile_from_args(args, repo_root), repo_root)
 
 
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     command = server_command(args, repo_root)
     open_url = build_open_url(args.host, args.port, args.open_path)
+    profile = _profile_from_args(args, repo_root)
 
     print("Starting The Open Compute Protocol")
     print()
@@ -183,6 +107,9 @@ def main() -> int:
     print(f"  port:         {args.port}")
     print(f"  node id:      {args.node_id}")
     print(f"  display name: {args.display_name}")
+    print(f"  db:           {profile.db_path}")
+    print(f"  identity:     {profile.identity_dir}")
+    print(f"  workspace:    {profile.workspace_root}")
     print()
     print("OCP app:")
     print(f"  {open_url}")
