@@ -4,6 +4,7 @@ import html
 from typing import Any
 
 from mesh import SovereignMesh
+from server_browser_client import build_browser_client_script
 from server_control import build_control_bootstrap as _build_control_bootstrap
 
 
@@ -2494,41 +2495,7 @@ def build_control_page(mesh: SovereignMesh) -> str:
       { label: "/mesh/helpers/autonomy", href: "/mesh/helpers/autonomy" },
       { label: "/mesh/helpers/preferences", href: "/mesh/helpers/preferences" }
     ];
-    const OCP_OPERATOR_TOKEN_KEY = "ocp_operator_token";
-    function consumeOperatorToken() {
-      const hash = String(window.location.hash || "");
-      let token = "";
-      if (hash.indexOf("#ocp_operator_token=") === 0) {
-        token = decodeURIComponent(hash.slice("#ocp_operator_token=".length));
-      } else if (hash.indexOf("ocp_operator_token=") !== -1) {
-        token = new URLSearchParams(hash.replace(/^#/, "")).get("ocp_operator_token") || "";
-      }
-      if (token) {
-        try {
-          window.localStorage.setItem(OCP_OPERATOR_TOKEN_KEY, token);
-        } catch (error) {
-        }
-        history.replaceState(null, "", window.location.pathname + window.location.search);
-      }
-    }
-    function operatorToken() {
-      try {
-        return String(window.localStorage.getItem(OCP_OPERATOR_TOKEN_KEY) || "").trim();
-      } catch (error) {
-        return "";
-      }
-    }
-    function withOperatorAuth(options) {
-      const next = Object.assign({}, options || {});
-      const headers = new Headers(next.headers || {});
-      const token = operatorToken();
-      if (token && !headers.has("X-OCP-Operator-Token")) {
-        headers.set("X-OCP-Operator-Token", token);
-      }
-      next.headers = headers;
-      return next;
-    }
-    consumeOperatorToken();
+__OCP_BROWSER_CLIENT__
     const app = {
       state: OCP_CONTROL_BOOTSTRAP,
       meshScene: null,
@@ -2618,22 +2585,6 @@ def build_control_page(mesh: SovereignMesh) -> str:
         node.textContent = "";
         node.classList.remove("is-visible");
       });
-    }
-
-    async function fetchJson(url, options) {
-      const response = await fetch(url, withOperatorAuth(options));
-      if (!response.ok) {
-        let message = response.status + " " + response.statusText;
-        try {
-          const payload = await response.json();
-          if (payload && payload.error) {
-            message = payload.error;
-          }
-        } catch (error) {
-        }
-        throw new Error(message);
-      }
-      return response.json();
     }
 
     function utcValue(input) {
@@ -5405,4 +5356,8 @@ def build_control_page(mesh: SovereignMesh) -> str:
   </script>
 </body>
 </html>"""
-    return control_html.replace("__OCP_CONTROL_BOOTSTRAP__", bootstrap)
+    return (
+        control_html
+        .replace("__OCP_CONTROL_BOOTSTRAP__", bootstrap)
+        .replace("__OCP_BROWSER_CLIENT__", build_browser_client_script())
+    )

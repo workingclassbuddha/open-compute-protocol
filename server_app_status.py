@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 from typing import Any
 
 from mesh import SovereignMesh
@@ -132,6 +133,115 @@ def _next_actions(
     return actions[:5]
 
 
+def _configured_operator_token() -> bool:
+    return bool((os.environ.get("OCP_OPERATOR_TOKEN") or os.environ.get("OCP_CONTROL_TOKEN") or "").strip())
+
+
+def _route_fix(routes: dict[str, Any]) -> str:
+    for route in list(routes.get("routes") or []):
+        route = dict(route or {})
+        status = str(route.get("status") or "").strip().lower()
+        freshness = str(route.get("freshness") or "").strip().lower()
+        if status != "reachable" or freshness in {"stale", "failed"}:
+            return str(
+                route.get("operator_hint")
+                or route.get("operator_summary")
+                or "Press Activate Mesh to probe and repair this peer route."
+            )
+    return "Press Activate Mesh to probe and repair peer routes."
+
+
+def _setup_projection(
+    *,
+    mesh_quality: dict[str, Any],
+    route_health: dict[str, Any],
+    connectivity: dict[str, Any],
+    approvals: dict[str, Any],
+    latest_proof: dict[str, Any],
+    autonomy: dict[str, Any],
+    app_urls: dict[str, Any],
+) -> dict[str, Any]:
+    sharing_mode = str(connectivity.get("sharing_mode") or "").strip().lower()
+    token_configured = _configured_operator_token()
+    peer_count = int(mesh_quality.get("peer_count") or 0)
+    route_count = int(mesh_quality.get("route_count") or 0)
+    healthy_routes = int(mesh_quality.get("healthy_routes") or 0)
+    proof_status = str(latest_proof.get("status") or "none").strip().lower()
+    last_run = dict((autonomy or {}).get("last_run") or {})
+    run_status = str(last_run.get("status") or "").strip().lower()
+    pending_approvals = int(approvals.get("pending_count") or 0)
+
+    status = "ready"
+    label = "Ready for setup"
+    blocking_issue = ""
+    next_fix = "Press Activate Mesh to discover nearby devices, repair routes, and run a proof."
+
+    if run_status == "running":
+        status = "proving"
+        label = "Proving mesh"
+        next_fix = "Keep this page open while OCP finishes route checks and proof execution."
+    elif proof_status == "completed" and route_count and healthy_routes == route_count:
+        status = "strong"
+        label = "Mesh strong"
+        next_fix = "No fix needed. The current mesh proof completed."
+    elif proof_status in {"planned", "queued", "running", "accepted"}:
+        status = "proving"
+        label = "Proof running"
+        next_fix = "Wait for the proof mission to finish, then refresh setup status."
+    elif proof_status in {"failed", "needs_attention", "cancelled"}:
+        status = "needs_attention"
+        label = "Proof needs attention"
+        blocking_issue = "The latest mesh proof did not complete."
+        next_fix = "Press Activate Mesh again so OCP can repair routes and retry once."
+    elif pending_approvals:
+        status = "needs_attention"
+        label = "Approval needed"
+        blocking_issue = f"{pending_approvals} approval(s) need review."
+        next_fix = "Open Advanced Control and approve or reject the pending helper request."
+    elif sharing_mode == "lan" and not token_configured:
+        status = "needs_attention"
+        label = "LAN token needed"
+        blocking_issue = "This node is LAN-reachable but no operator token is configured for phone control."
+        next_fix = "Restart with OCP_OPERATOR_TOKEN set, or start Mesh Mode from the Mac launcher."
+    elif route_count and healthy_routes < route_count:
+        status = "needs_attention"
+        label = "Route needs repair"
+        blocking_issue = "One or more peer routes are stale or unreachable."
+        next_fix = _route_fix(route_health)
+    elif sharing_mode == "local" and not peer_count:
+        status = "local_only"
+        label = "Local only"
+        blocking_issue = "This node is only listening on this computer."
+        next_fix = "Start Mesh Mode to use your phone or spare laptop on the same Wi-Fi."
+    elif route_count and healthy_routes == route_count:
+        status = "ready"
+        label = "Routes ready"
+        next_fix = "Press Activate Mesh to run a whole-mesh proof."
+
+    if status == "strong":
+        operator_summary = "Mesh is strong. Devices have proven routes and the latest proof completed."
+    elif blocking_issue:
+        operator_summary = f"{blocking_issue} {next_fix}"
+    else:
+        operator_summary = next_fix
+
+    return {
+        "status": status,
+        "label": label,
+        "primary_action": "activate_mesh",
+        "bind_mode": sharing_mode or "unknown",
+        "phone_url": app_urls.get("phone_url") or app_urls.get("app_url") or "",
+        "token_status": "configured" if token_configured else "loopback_only",
+        "known_peer_count": peer_count,
+        "healthy_route_count": healthy_routes,
+        "route_count": route_count,
+        "latest_proof_status": proof_status,
+        "blocking_issue": blocking_issue,
+        "next_fix": next_fix,
+        "operator_summary": operator_summary,
+    }
+
+
 def build_app_status(mesh: SovereignMesh) -> dict[str, Any]:
     manifest = dict(_safe({}, mesh.get_manifest))
     autonomic = dict(
@@ -151,18 +261,31 @@ def build_app_status(mesh: SovereignMesh) -> dict[str, Any]:
     approvals_raw = dict(_safe({"approvals": []}, mesh.list_approvals, limit=12, status="pending"))
     latest_proof = _latest_proof(missions)
     approvals = _pending_approvals(approvals_raw)
+    mesh_quality = _mesh_quality(autonomic, peers)
+    app_urls = _app_urls(mesh, connectivity)
+    route_health = autonomic.get("routes") or {"routes": [], "count": 0, "healthy": 0}
+    setup = _setup_projection(
+        mesh_quality=mesh_quality,
+        route_health=route_health,
+        connectivity=connectivity,
+        approvals=approvals,
+        latest_proof=latest_proof,
+        autonomy=autonomic,
+        app_urls=app_urls,
+    )
     return {
         "status": "ok",
         "node": _node_summary(mesh, manifest),
-        "app_urls": _app_urls(mesh, connectivity),
-        "mesh_quality": _mesh_quality(autonomic, peers),
+        "app_urls": app_urls,
+        "mesh_quality": mesh_quality,
+        "setup": setup,
         "autonomy": {
             "status": autonomic.get("status") or "unknown",
             "mode": autonomic.get("mode") or "assisted",
             "operator_summary": autonomic.get("operator_summary") or "",
             "last_run": autonomic.get("last_run") or {},
         },
-        "route_health": autonomic.get("routes") or {"routes": [], "count": 0, "healthy": 0},
+        "route_health": route_health,
         "latest_proof": latest_proof,
         "approvals": approvals,
         "next_actions": _next_actions(autonomic, connectivity, approvals, latest_proof),

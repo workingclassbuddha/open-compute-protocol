@@ -715,42 +715,42 @@ class MeshAutonomyService:
             result["diagnostics"] = diagnostics
             self._action(
                 actions,
-                "diagnostics",
+                "setup_checked",
                 "ok",
                 diagnostics.get("share_advice") or "Checked local IPs and shareable URLs.",
                 details={"sharing_mode": diagnostics.get("sharing_mode"), "lan_urls": diagnostics.get("lan_urls") or []},
                 request_id=request_token,
             )
         except Exception as exc:
-            self._action(actions, "diagnostics", "warning", f"Connectivity diagnostics failed: {exc}", details={"error": str(exc)}, request_id=request_token)
+            self._action(actions, "fix_needed", "warning", f"Connectivity diagnostics failed: {exc}", details={"error": str(exc)}, request_id=request_token)
 
         try:
             scan = self.mesh.scan_local_peers(timeout=scan_timeout, limit=limit, trust_tier="trusted")
             result["scan"] = scan
             self._action(
                 actions,
-                "scan",
+                "peer_scan",
                 "ok",
                 f"Scanned nearby routes: {scan.get('reachable', scan.get('discovered', 0))} candidate(s) surfaced.",
                 details={"discovered": scan.get("discovered"), "errors": scan.get("errors")},
                 request_id=request_token,
             )
         except Exception as exc:
-            self._action(actions, "scan", "warning", f"Nearby scan could not complete: {exc}", details={"error": str(exc)}, request_id=request_token)
+            self._action(actions, "fix_needed", "warning", f"Nearby scan could not complete: {exc}", details={"error": str(exc)}, request_id=request_token)
 
         try:
             connected = self.mesh.connect_all_devices(timeout=timeout, scan_timeout=scan_timeout, limit=limit, trust_tier="trusted")
             result["connect"] = connected
             self._action(
                 actions,
-                "connect",
+                "setup_checked",
                 "ok",
                 connected.get("operator_summary") or f"Connected {connected.get('connected', 0)} peer(s).",
                 details={"connected": connected.get("connected"), "already_connected": connected.get("already_connected"), "errors": connected.get("errors")},
                 request_id=request_token,
             )
         except Exception as exc:
-            self._action(actions, "connect", "warning", f"Connect pass had trouble: {exc}", details={"error": str(exc)}, request_id=request_token)
+            self._action(actions, "fix_needed", "warning", f"Connect pass had trouble: {exc}", details={"error": str(exc)}, request_id=request_token)
 
         peer_rows = list(self.mesh.list_peers(limit=max(24, int(limit or 24) * 2)).get("peers") or [])
         peer_ids = [str(peer.get("peer_id") or "").strip() for peer in peer_rows if str(peer.get("peer_id") or "").strip()]
@@ -760,7 +760,7 @@ class MeshAutonomyService:
             route_probes.append(probe)
             self._action(
                 actions,
-                "route_probe",
+                "route_verified" if int(probe.get("reachable") or 0) else "fix_needed",
                 "ok" if int(probe.get("reachable") or 0) else "warning",
                 probe.get("operator_summary") or f"Probed routes for {peer_id}.",
                 peer_id=peer_id,
@@ -787,21 +787,21 @@ class MeshAutonomyService:
                 mission_status = str(mission.get("status") or proof.get("status") or "unknown")
                 self._action(
                     actions,
-                    "whole_mesh_proof",
+                    "proof_completed" if mission_status in {"completed", "planned", "accepted"} else "fix_needed",
                     "ok" if mission_status in {"completed", "planned", "accepted"} else "warning",
                     f"Whole-mesh proof launched with status {mission_status}.",
                     details={"mission_id": mission.get("id"), "mission_status": mission_status},
                     request_id=request_token,
                 )
                 if repair and self._proof_failed_due_transport(proof):
-                    self._action(actions, "route_repair", "running", "Proof hit a transport timeout; probing routes once before retry.", request_id=request_token)
+                    self._action(actions, "fix_needed", "running", "Proof hit a transport timeout; probing routes once before retry.", request_id=request_token)
                     result["repairs"] = self._repair_routes(peer_ids, timeout=timeout, request_id=request_token, actions=actions)
                     proof = self._run_whole_mesh_proof(include_local=True, limit=limit, request_id=f"{request_token}-proof-retry")
                     result["proof_retry"] = proof
                     retry_mission = dict(proof.get("mission") or {})
                     self._action(
                         actions,
-                        "whole_mesh_proof_retry",
+                        "proof_completed",
                         "ok",
                         f"Retried whole-mesh proof with status {retry_mission.get('status') or proof.get('status') or 'unknown'}.",
                         details={"mission_id": retry_mission.get("id"), "mission_status": retry_mission.get("status")},
@@ -809,7 +809,7 @@ class MeshAutonomyService:
                     )
             except Exception as exc:
                 result["proof_error"] = str(exc)
-                self._action(actions, "whole_mesh_proof", "warning", f"Whole-mesh proof needs attention: {exc}", details={"error": str(exc)}, request_id=request_token)
+                self._action(actions, "fix_needed", "warning", f"Whole-mesh proof needs attention: {exc}", details={"error": str(exc)}, request_id=request_token)
 
         status, summary = self._activation_outcome(result, actions)
         run = self._record_run(
@@ -872,7 +872,7 @@ class MeshAutonomyService:
                 limit=max(1, int(max_enlist or 2)) * 3,
             )
         except Exception as exc:
-            self._action(actions, "helper_plan", "warning", f"Helper planning failed: {exc}", details={"error": str(exc)}, request_id=request_id)
+            self._action(actions, "fix_needed", "warning", f"Helper planning failed: {exc}", details={"error": str(exc)}, request_id=request_id)
             return {"status": "error", "error": str(exc), "plan": {}, "enlisted": [], "approvals": [], "skipped": []}
 
         enlisted = []
@@ -880,7 +880,7 @@ class MeshAutonomyService:
         skipped = []
         self._action(
             actions,
-            "helper_plan",
+            "helper_ready",
             "ok",
             f"Evaluated {plan.get('candidate_count', 0)} helper candidate(s).",
             details={"candidate_count": plan.get("candidate_count")},
@@ -928,14 +928,14 @@ class MeshAutonomyService:
             peer = self.mesh._row_to_peer(self.mesh._get_peer_row(peer_id)) or {}
             if not self._route_is_usable(peer):
                 skipped.append({"peer_id": peer_id, "reason": "route_not_usable"})
-                self._action(actions, "helper_skipped", "warning", f"Did not enlist {peer_id} because no fresh working route is proven.", peer_id=peer_id, request_id=request_id)
+                self._action(actions, "fix_needed", "warning", f"Did not enlist {peer_id} because no fresh working route is proven.", peer_id=peer_id, request_id=request_id)
                 continue
             trust = self._normalize_trust_tier(candidate.get("trust_tier") or "trusted")
             device_class = str(candidate.get("device_class") or "full").strip().lower()
             role = "gpu_helper" if dict(candidate.get("compute_profile") or {}).get("gpu_capable") else "helper"
             if str((candidate.get("enlistment") or {}).get("state") or "").strip().lower() == "enlisted":
                 skipped.append({"peer_id": peer_id, "reason": "already_enlisted"})
-                self._action(actions, "helper_reuse", "ok", f"{candidate.get('display_name') or peer_id} is already enlisted.", peer_id=peer_id, request_id=request_id)
+                self._action(actions, "helper_ready", "ok", f"{candidate.get('display_name') or peer_id} is already enlisted.", peer_id=peer_id, request_id=request_id)
                 continue
             if len(enlisted) >= max(0, int(max_enlist or 0)):
                 skipped.append({"peer_id": peer_id, "reason": "max_enlist_reached"})
@@ -944,10 +944,10 @@ class MeshAutonomyService:
                 try:
                     state = self.mesh.enlist_helper(peer_id, mode="on_demand", role=role, reason="autonomic_mesh_activation", source="autonomy")
                     enlisted.append({"peer_id": peer_id, "state": state})
-                    self._action(actions, "helper_enlisted", "ok", f"Enlisted {candidate.get('display_name') or peer_id} as a safe helper.", peer_id=peer_id, details={"role": role}, request_id=request_id)
+                    self._action(actions, "helper_ready", "ok", f"Enlisted {candidate.get('display_name') or peer_id} as a safe helper.", peer_id=peer_id, details={"role": role}, request_id=request_id)
                 except Exception as exc:
                     skipped.append({"peer_id": peer_id, "reason": str(exc)})
-                    self._action(actions, "helper_enlist_failed", "warning", f"Could not enlist {peer_id}: {exc}", peer_id=peer_id, details={"error": str(exc)}, request_id=request_id)
+                    self._action(actions, "fix_needed", "warning", f"Could not enlist {peer_id}: {exc}", peer_id=peer_id, details={"error": str(exc)}, request_id=request_id)
             elif trust == "partner":
                 approval = self.mesh.create_approval_request(
                     title=f"Allow {candidate.get('display_name') or peer_id} to help this mesh?",
@@ -973,10 +973,10 @@ class MeshAutonomyService:
                     },
                 )
                 approvals.append(approval)
-                self._action(actions, "helper_approval_requested", "approval_required", f"Asked before using partner peer {candidate.get('display_name') or peer_id}.", peer_id=peer_id, details={"approval": approval}, request_id=request_id)
+                self._action(actions, "helper_ready", "approval_required", f"Asked before using partner peer {candidate.get('display_name') or peer_id}.", peer_id=peer_id, details={"approval": approval}, request_id=request_id)
             else:
                 skipped.append({"peer_id": peer_id, "reason": f"trust_tier_{trust}_not_auto_enlisted"})
-                self._action(actions, "helper_skipped", "blocked", f"Did not auto-enlist {peer_id} because trust tier is {trust}.", peer_id=peer_id, request_id=request_id)
+                self._action(actions, "fix_needed", "blocked", f"Did not auto-enlist {peer_id} because trust tier is {trust}.", peer_id=peer_id, request_id=request_id)
         return {
             "status": "ok",
             "plan": plan,

@@ -7,6 +7,7 @@ import socket
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -130,8 +131,32 @@ def build_open_url(host: str, port: int, path: str = "/") -> str:
     return f"http://{display_host_for_browser(host)}:{int(port)}{route}"
 
 
+def operator_app_url(base_url: str, operator_token: str = "", *, path: str = "/app") -> str:
+    base = str(base_url or "").strip().rstrip("/")
+    if not base:
+        return ""
+    route = str(path or "/app").strip() or "/app"
+    route = route if route.startswith("/") else f"/{route}"
+    url = base if base.endswith(route) else f"{base}{route}"
+    token = str(operator_token or "").strip()
+    if not token:
+        return url
+    return f"{url}#ocp_operator_token={urllib.parse.quote(token, safe='')}"
+
+
 def health_url(host: str, port: int) -> str:
     return build_open_url(host, port, "/mesh/manifest")
+
+
+def port_is_available(host: str, port: int) -> bool:
+    token = str(host or "").strip() or "127.0.0.1"
+    bind_host = "" if is_wildcard_host(token) else display_host_for_browser(token)
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind((bind_host, int(port)))
+        return True
+    except OSError:
+        return False
 
 
 def default_repo_state_dir(repo_root: Path) -> Path:
@@ -306,6 +331,8 @@ __all__ = [
     "health_url",
     "is_loopback_host",
     "is_wildcard_host",
+    "operator_app_url",
+    "port_is_available",
     "profile_from_values",
     "read_json_file",
     "resolve_state_paths",

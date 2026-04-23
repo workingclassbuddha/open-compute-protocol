@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -23,7 +24,9 @@ if root_str not in sys.path:
 
 import server
 import server_app
+import server_app_status
 import server_artifacts
+import server_browser_client
 import server_connect
 import server_control
 import server_control_page
@@ -5023,14 +5026,16 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(probe.content_type, "text/html; charset=utf-8")
         self.assertIn("OCP App", probe.payload)
         self.assertIn("One app for the mesh.", probe.payload)
-        self.assertIn("OCP Easy Setup", probe.payload)
-        self.assertIn("OCP Control Deck", probe.payload)
+        self.assertIn("Setup Details", probe.payload)
+        self.assertIn("Advanced Control", probe.payload)
+        self.assertIn("Activate Mesh", probe.payload)
         self.assertIn("/easy", probe.payload)
         self.assertIn("/control", probe.payload)
         self.assertIn("/mesh/contract", probe.payload)
         self.assertIn("/app.webmanifest", probe.payload)
 
         manifest_probe = ProbeHandler()
+        manifest_probe.server = SimpleNamespace(mesh=alpha.mesh)
         manifest_probe._handle_app_manifest()
 
         self.assertEqual(manifest_probe.code, 200)
@@ -5038,6 +5043,65 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(manifest_probe.payload["short_name"], "OCP")
         self.assertEqual(manifest_probe.payload["start_url"], "/app")
         self.assertEqual(manifest_probe.payload["display"], "standalone")
+
+    def test_shared_browser_client_supports_operator_token_and_fetch(self):
+        script = server_browser_client.build_browser_client_script()
+
+        self.assertIn("ocp_operator_token", script)
+        self.assertIn("X-OCP-Operator-Token", script)
+        self.assertIn("function withOperatorFragment", script)
+        self.assertIn("async function fetchJson", script)
+        self.assertIn("async function copyText", script)
+        self.assertIn("if (!response.ok)", script)
+
+    def test_app_status_setup_projection_surfaces_foolproof_states(self):
+        base = {
+            "mesh_quality": {"peer_count": 0, "route_count": 0, "healthy_routes": 0},
+            "route_health": {"status": "ok", "count": 0, "healthy": 0, "routes": []},
+            "connectivity": {"sharing_mode": "local"},
+            "approvals": {"pending_count": 0},
+            "latest_proof": {"status": "none"},
+            "autonomy": {"last_run": {}},
+            "app_urls": {"phone_url": "http://127.0.0.1:8421/app"},
+        }
+
+        with mock.patch.dict(os.environ, {"OCP_OPERATOR_TOKEN": "", "OCP_CONTROL_TOKEN": ""}, clear=False):
+            local_only = server_app_status._setup_projection(**base)
+            self.assertEqual(local_only["status"], "local_only")
+            self.assertIn("Start Mesh Mode", local_only["next_fix"])
+
+            lan_missing_token = server_app_status._setup_projection(
+                **{**base, "connectivity": {"sharing_mode": "lan"}}
+            )
+            self.assertEqual(lan_missing_token["status"], "needs_attention")
+            self.assertIn("operator token", lan_missing_token["blocking_issue"])
+
+        route_needs_repair = {
+            **base,
+            "mesh_quality": {"peer_count": 1, "route_count": 1, "healthy_routes": 0},
+            "route_health": {
+                "status": "ok",
+                "count": 1,
+                "healthy": 0,
+                "routes": [{"status": "reachable", "freshness": "stale", "operator_summary": "Beta route is stale."}],
+            },
+            "connectivity": {"sharing_mode": "lan"},
+        }
+        with mock.patch.dict(os.environ, {"OCP_OPERATOR_TOKEN": "token"}, clear=False):
+            repair = server_app_status._setup_projection(**route_needs_repair)
+            self.assertEqual(repair["status"], "needs_attention")
+            self.assertIn("stale", repair["next_fix"])
+
+            strong = server_app_status._setup_projection(
+                **{
+                    **route_needs_repair,
+                    "mesh_quality": {"peer_count": 1, "route_count": 1, "healthy_routes": 1},
+                    "route_health": {"status": "ok", "count": 1, "healthy": 1, "routes": []},
+                    "latest_proof": {"status": "completed"},
+                }
+            )
+            self.assertEqual(strong["status"], "strong")
+            self.assertEqual(strong["primary_action"], "activate_mesh")
 
     def test_raw_mesh_post_routes_require_operator_auth_off_loopback(self):
         alpha = self.make_stack("alpha")
@@ -5384,8 +5448,8 @@ class SovereignMeshTests(unittest.TestCase):
 
         self.assertIn(result["status"], {"completed", "partial"})
         self.assertGreaterEqual(result["routes"]["healthy"], 1)
-        self.assertTrue(any(action["kind"] == "route_probe" for action in result["actions"]))
-        self.assertTrue(any(action["kind"] == "whole_mesh_proof" for action in result["actions"]))
+        self.assertTrue(any(action["kind"] == "route_verified" for action in result["actions"]))
+        self.assertTrue(any("proof" in action["summary"].lower() for action in result["actions"]))
         self.assertTrue(result["helpers"]["enlisted"])
         self.assertEqual(alpha.mesh.autonomy.latest_run()["request_id"], "autonomic-activation-test")
 
@@ -5557,7 +5621,7 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(calls["proof"], 2)
         self.assertGreaterEqual(calls["probe"], 1)
         self.assertGreaterEqual(calls["sync"], 1)
-        self.assertTrue(any(action["kind"] == "whole_mesh_proof_retry" for action in result["actions"]))
+        self.assertTrue(any(action["kind"] == "proof_completed" for action in result["actions"]))
 
     def test_server_autonomic_mesh_handlers_round_trip(self):
         alpha = self.make_stack("alpha")
@@ -6206,8 +6270,14 @@ class SovereignMeshTests(unittest.TestCase):
                 "node": {},
                 "app_urls": {},
                 "mesh_quality": {},
+                "setup": {
+                    "status": "ready",
+                    "primary_action": "activate_mesh",
+                    "phone_url": "/app",
+                    "next_fix": "Press Activate Mesh.",
+                },
                 "route_health": {"status": "ok", "routes": []},
-                "next_actions": ["Activate Autonomic Mesh."],
+                "next_actions": ["Activate Mesh."],
             },
         )
         self.assertEqual(valid_app_status["status"], "ok")
@@ -6606,14 +6676,15 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("OCP App", markup)
         self.assertIn("One app for the mesh.", markup)
         self.assertIn("OCP Today", markup)
-        self.assertIn("Activate Autonomic Mesh", markup)
+        self.assertIn("Activate Mesh", markup)
+        self.assertIn("Setup Doctor", markup)
         self.assertIn("Phone Link + QR", markup)
         self.assertIn("/mesh/app/status", markup)
         self.assertIn("ocp_operator_token", markup)
         self.assertIn("X-OCP-Operator-Token", markup)
         self.assertIn("if (!response.ok)", markup)
-        self.assertIn("OCP Easy Setup", markup)
-        self.assertIn("OCP Control Deck", markup)
+        self.assertIn("Setup Details", markup)
+        self.assertIn("Advanced Control", markup)
         self.assertIn("/easy", markup)
         self.assertIn("/control", markup)
         self.assertIn("/app.webmanifest", markup)
@@ -6632,6 +6703,9 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("route_health", app_status)
         self.assertIn("latest_proof", app_status)
         self.assertIn("next_actions", app_status)
+        self.assertEqual(app_status["setup"]["primary_action"], "activate_mesh")
+        self.assertIn(app_status["setup"]["status"], {"ready", "local_only", "needs_attention", "proving", "strong"})
+        self.assertNotIn("ocp_operator_token", app_status["setup"]["phone_url"])
         self.assertIn("/app", app_status["app_urls"]["app_url"])
 
         with urlopen(f"{base_url}/app.webmanifest") as response:
@@ -6703,6 +6777,16 @@ class SovereignMeshTests(unittest.TestCase):
             self.assertIn("--db-path", command)
             self.assertIn(str(state_dir / "ocp.db"), command)
             self.assertEqual(ocp_startup.health_url("0.0.0.0", 8555), "http://127.0.0.1:8555/mesh/manifest")
+            self.assertEqual(
+                ocp_startup.operator_app_url("http://192.168.1.44:8555/", "secret token"),
+                "http://192.168.1.44:8555/app#ocp_operator_token=secret%20token",
+            )
+            self.assertTrue(ocp_startup.port_is_available("127.0.0.1", 0))
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind(("127.0.0.1", 0))
+                sock.listen(1)
+                busy_port = sock.getsockname()[1]
+                self.assertFalse(ocp_startup.port_is_available("127.0.0.1", busy_port))
 
             custom_db = Path(tmp) / "custom" / "demo.db"
             custom_profile = ocp_startup.profile_from_values(
@@ -6741,6 +6825,14 @@ class SovereignMeshTests(unittest.TestCase):
             self.assertEqual(
                 ocp_launcher.operator_app_url("http://192.168.1.44:8666/", "secret token"),
                 "http://192.168.1.44:8666/app#ocp_operator_token=secret%20token",
+            )
+            self.assertIn(
+                "ready for phone setup",
+                ocp_launcher.launcher_status_message({"setup": {"status": "ready"}}).lower(),
+            )
+            self.assertIn(
+                "Needs firewall",
+                ocp_launcher.launcher_status_message({"setup": {"status": "needs_attention", "next_fix": "Needs firewall"}}),
             )
 
     def test_desktop_launcher_config_round_trips(self):

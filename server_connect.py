@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from mesh import SovereignMesh
+from server_browser_client import build_browser_client_script
 from server_control import build_control_bootstrap
 
 
@@ -596,58 +597,11 @@ EASY_PAGE_TEMPLATE = """<!doctype html>
 
   <script>
     const OCP_EASY_BOOTSTRAP = __OCP_EASY_BOOTSTRAP__;
-    const OCP_OPERATOR_TOKEN_KEY = "ocp_operator_token";
+__OCP_BROWSER_CLIENT__
     const easyApp = {
       state: OCP_EASY_BOOTSTRAP,
       refreshTimer: null
     };
-
-    function consumeOperatorToken() {
-      const hash = String(window.location.hash || "");
-      let token = "";
-      if (hash.indexOf("#ocp_operator_token=") === 0) {
-        token = decodeURIComponent(hash.slice("#ocp_operator_token=".length));
-      } else if (hash.indexOf("ocp_operator_token=") !== -1) {
-        token = new URLSearchParams(hash.replace(/^#/, "")).get("ocp_operator_token") || "";
-      }
-      if (token) {
-        try {
-          window.localStorage.setItem(OCP_OPERATOR_TOKEN_KEY, token);
-        } catch (error) {
-        }
-        history.replaceState(null, "", window.location.pathname + window.location.search);
-      }
-    }
-
-    function operatorToken() {
-      try {
-        return String(window.localStorage.getItem(OCP_OPERATOR_TOKEN_KEY) || "").trim();
-      } catch (error) {
-        return "";
-      }
-    }
-
-    function withOperatorAuth(options) {
-      const next = Object.assign({}, options || {});
-      const headers = new Headers(next.headers || {});
-      const token = operatorToken();
-      if (token && !headers.has("X-OCP-Operator-Token")) {
-        headers.set("X-OCP-Operator-Token", token);
-      }
-      next.headers = headers;
-      return next;
-    }
-
-    function withOperatorFragment(url) {
-      const token = operatorToken();
-      const target = String(url || "");
-      if (!token || !target) {
-        return target;
-      }
-      return target.replace(/#.*$/, "") + "#ocp_operator_token=" + encodeURIComponent(token);
-    }
-
-    consumeOperatorToken();
 
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, function (token) {
@@ -705,40 +659,6 @@ EASY_PAGE_TEMPLATE = """<!doctype html>
         return "Use this peer for treaty-aware visibility, but choose a custody-capable peer for protected restores.";
       }
       return "Keep this peer on normal sync until it advertises treaty validation.";
-    }
-
-    async function fetchJson(url, options) {
-      const response = await fetch(url, withOperatorAuth(options));
-      if (!response.ok) {
-        let detail = response.statusText || "request failed";
-        try {
-          const payload = await response.json();
-          detail = payload.error || payload.message || detail;
-        } catch (error) {
-        }
-        throw new Error(detail);
-      }
-      return response.json();
-    }
-
-    async function copyText(text) {
-      const token = String(text || "");
-      if (!token) {
-        throw new Error("nothing to copy");
-      }
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(token);
-        return;
-      }
-      const input = document.createElement("textarea");
-      input.value = token;
-      input.setAttribute("readonly", "readonly");
-      input.style.position = "absolute";
-      input.style.left = "-9999px";
-      document.body.appendChild(input);
-      input.select();
-      document.execCommand("copy");
-      document.body.removeChild(input);
     }
 
     function renderEasyQr(url) {
@@ -1122,7 +1042,11 @@ EASY_PAGE_TEMPLATE = """<!doctype html>
 
 
 def build_easy_page(mesh: SovereignMesh) -> str:
-    return EASY_PAGE_TEMPLATE.replace("__OCP_EASY_BOOTSTRAP__", build_easy_bootstrap(mesh))
+    return (
+        EASY_PAGE_TEMPLATE
+        .replace("__OCP_EASY_BOOTSTRAP__", build_easy_bootstrap(mesh))
+        .replace("__OCP_BROWSER_CLIENT__", build_browser_client_script())
+    )
 
 
 __all__ = [

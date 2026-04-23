@@ -10,7 +10,7 @@
 
 **A sovereign, local-first compute fabric for trusted devices.**
 
-[![Tests](https://img.shields.io/badge/tests-185%20passing-00FF88?style=flat-square&labelColor=06090F)](./tests/test_sovereign_mesh.py)
+[![Tests](https://img.shields.io/badge/tests-187%20passing-00FF88?style=flat-square&labelColor=06090F)](./tests/test_sovereign_mesh.py)
 [![Release](https://img.shields.io/badge/release-v0.1.4-F6C177?style=flat-square&labelColor=06090F)](./README.md#current-status)
 [![Version](https://img.shields.io/badge/wire%20version-sovereign--mesh%2Fv1-00D4FF?style=flat-square&labelColor=06090F)](./docs/OCP_STATUS.md)
 [![Status](https://img.shields.io/badge/status-active%20development-C8A96E?style=flat-square&labelColor=06090F)](./docs/OCP_MASTER_PLAN.md)
@@ -131,7 +131,7 @@ Some devices are powerful. Some are private. Some are fragile. Some are approval
 | `server_control_page.py` | Extracted control-deck renderer for the advanced operator surface |
 | `server_http_handlers.py` | Grouped HTTP route handlers so `server.py` stays a thin transport host |
 | `docs/` | Protocol notes, status, and roadmap |
-| `tests/test_sovereign_mesh.py` | Regression suite — 185 tests |
+| `tests/test_sovereign_mesh.py` | Regression suite — 187 tests |
 
 **Key runtime concepts:**
 
@@ -282,7 +282,7 @@ python3 -m unittest tests.test_sovereign_mesh
 python3 server.py --help
 ```
 
-Current baseline: **185 tests passing.**
+Current baseline: **187 tests passing.**
 
 ---
 
@@ -296,7 +296,7 @@ Current baseline: **185 tests passing.**
 - Private artifact content fetches now require operator auth unless the artifact policy is public.
 - Runtime execution now defaults to explicit environment inheritance, with `inherit_env_allowlist` for deliberate host env pass-through.
 - The signed envelope implementation now uses dependency-free Ed25519 helpers under `ed25519-sha512-v1`.
-- The protocol-kernel refactor and mission-continuity/treaty foundation from v0.1.3 remain intact, with the full regression suite green at 185 tests.
+- The protocol-kernel refactor and mission-continuity/treaty foundation from v0.1.3 remain intact, with the full regression suite green at 187 tests.
 
 **Implemented in the current runtime**
 

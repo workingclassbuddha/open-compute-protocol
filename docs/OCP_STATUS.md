@@ -280,4 +280,4 @@ python3 -m unittest tests.test_sovereign_mesh
 ```
 
 Current standalone baseline:
-- `tests.test_sovereign_mesh`: 185 tests passing
+- `tests.test_sovereign_mesh`: 187 tests passing

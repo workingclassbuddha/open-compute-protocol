@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import secrets
 import subprocess
 import sys
 import urllib.error
-import urllib.parse
 import urllib.request
 import webbrowser
 from dataclasses import dataclass
@@ -87,14 +87,7 @@ def normalize_launcher_config(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def operator_app_url(base_url: str, operator_token: str = "") -> str:
-    base = str(base_url or "").strip().rstrip("/")
-    if not base:
-        return ""
-    app_url = base if base.endswith("/app") else f"{base}/app"
-    token = str(operator_token or "").strip()
-    if not token:
-        return app_url
-    return f"{app_url}#ocp_operator_token={urllib.parse.quote(token, safe='')}"
+    return ocp_startup.operator_app_url(base_url, operator_token)
 
 
 def build_launch_plan(
@@ -138,6 +131,37 @@ def server_is_alive(plan: LaunchPlan, *, timeout: float = 0.75) -> bool:
             return response.status == 200
     except (OSError, urllib.error.URLError):
         return False
+
+
+def fetch_app_status(plan: LaunchPlan, *, operator_token: str = "", timeout: float = 0.75) -> dict[str, Any]:
+    url = ocp_startup.build_open_url(plan.profile.host, plan.profile.port, "/mesh/app/status")
+    request = urllib.request.Request(url)
+    token = str(operator_token or "").strip()
+    if token:
+        request.add_header("X-OCP-Operator-Token", token)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            if response.status != 200:
+                return {}
+            return json.loads(response.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError):
+        return {}
+
+
+def launcher_status_message(payload: dict[str, Any]) -> str:
+    setup = dict((payload or {}).get("setup") or {})
+    status = str(setup.get("status") or "").strip().lower()
+    if status == "strong":
+        return "Mesh is strong. Latest proof completed."
+    if status == "proving":
+        return "OCP is proving the mesh now..."
+    if status == "ready":
+        return "OCP is ready for phone setup. Open the phone link below and press Activate Mesh."
+    if status == "local_only":
+        return "OCP is running local-only. Start Mesh Mode to use your phone or spare laptop."
+    if status == "needs_attention":
+        return "OCP needs attention: " + str(setup.get("next_fix") or setup.get("blocking_issue") or "open the app for details.")
+    return str(setup.get("operator_summary") or "OCP is running.")
 
 
 class OCPLauncherApp:
@@ -297,9 +321,12 @@ class OCPLauncherApp:
         token = self._operator_token_for_mode(plan.mode)
         return operator_app_url(base_url, token)
 
-    def _render_links(self, plan: LaunchPlan) -> None:
+    def _render_links(self, plan: LaunchPlan, *, phone_url: str = "") -> None:
         rows = [f"App: {self._app_link(plan, plan.app_url)}"]
-        if plan.share_urls:
+        if phone_url:
+            rows.append("Phone/LAN:")
+            rows.append(f"  {self._app_link(plan, phone_url)}")
+        elif plan.share_urls:
             rows.append("Phone/LAN:")
             rows.extend(f"  {self._app_link(plan, url)}" for url in plan.share_urls)
         else:
@@ -312,7 +339,14 @@ class OCPLauncherApp:
         plan = self.current_plan
         if plan and self.process and self.process.poll() is None:
             if server_is_alive(plan):
-                self.status.set(f"OCP is running. Open {plan.app_url} or use the phone link below.")
+                payload = fetch_app_status(plan, operator_token=str(self.config.get("operator_token") or ""))
+                if payload:
+                    self.status.set(launcher_status_message(payload))
+                    setup = dict(payload.get("setup") or {})
+                    app_urls = dict(payload.get("app_urls") or {})
+                    self._render_links(plan, phone_url=str(setup.get("phone_url") or app_urls.get("phone_url") or ""))
+                else:
+                    self.status.set(f"OCP is running. Open {plan.app_url} or use the phone link below.")
             else:
                 self.status.set("OCP is starting...")
         elif self.process and self.process.poll() is not None:

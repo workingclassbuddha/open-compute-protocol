@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from mesh import SovereignMesh
+from server_browser_client import build_browser_client_script
 
 
 def _node_summary(mesh: SovereignMesh) -> dict[str, Any]:
@@ -47,6 +48,7 @@ def build_app_page(mesh: SovereignMesh) -> str:
     protocol = html.escape(str(summary.get("protocol_release") or "0.1"))
     version = html.escape(str(summary.get("protocol_version") or ""))
     version_label = f" / {version}" if version else ""
+    browser_client_js = build_browser_client_script()
 
     return f"""<!doctype html>
 <html lang="en">
@@ -473,15 +475,15 @@ def build_app_page(mesh: SovereignMesh) -> str:
 
     <nav class="tabs" aria-label="OCP app sections">
       <button class="tab" type="button" data-tab="today" aria-selected="true">Today</button>
-      <button class="tab" type="button" data-tab="setup" aria-selected="false">Setup</button>
-      <button class="tab" type="button" data-tab="control" aria-selected="false">Control</button>
+      <button class="tab" type="button" data-tab="setup" aria-selected="false">Setup Details</button>
+      <button class="tab" type="button" data-tab="control" aria-selected="false">Advanced Control</button>
       <button class="tab" type="button" data-tab="protocol" aria-selected="false">Protocol</button>
     </nav>
 
     <section id="today" class="panel module active today" aria-label="OCP Today module">
       <div class="today-grid">
         <div class="today-card">
-          <p class="eyebrow">Autonomic Mesh</p>
+          <p class="eyebrow">Setup Doctor</p>
           <h2 data-app-quality-label>Local node ready</h2>
           <p data-app-summary>Loading local mesh status...</p>
           <div class="mesh-state" aria-label="Mesh status metrics">
@@ -499,12 +501,12 @@ def build_app_page(mesh: SovereignMesh) -> str:
             </div>
           </div>
           <div class="today-actions">
-            <button class="primary-action" type="button" data-activate-autonomic>Activate Autonomic Mesh</button>
+            <button class="primary-action" type="button" data-activate-autonomic>Activate Mesh</button>
             <button class="secondary-action" type="button" data-refresh-status>Refresh</button>
             <a class="secondary-action" href="/mesh/app/status" target="_blank" rel="noreferrer">Inspect App Status</a>
           </div>
           <ul class="next-actions" data-next-actions>
-            <li>Press Activate Autonomic Mesh to discover, repair, enlist, prove, and explain this mesh.</li>
+            <li>Press Activate Mesh to discover, repair, enlist, prove, and explain this mesh.</li>
           </ul>
         </div>
         <aside class="today-card">
@@ -525,10 +527,10 @@ def build_app_page(mesh: SovereignMesh) -> str:
     <section id="setup" class="panel module" aria-label="OCP Easy Setup module">
       <div class="module-head">
         <div>
-          <h2>OCP Easy Setup</h2>
-          <p>Pair nearby machines, copy the easy link, scan QR, and test the whole mesh.</p>
+          <h2>Setup Details</h2>
+          <p>Pair nearby machines, copy the easy link, scan QR, and inspect setup diagnostics.</p>
         </div>
-        <a class="open-link" href="/easy">Open /easy directly</a>
+        <a class="open-link" href="/easy">Open setup details</a>
       </div>
       <iframe title="OCP Easy Setup" src="/easy"></iframe>
     </section>
@@ -536,10 +538,10 @@ def build_app_page(mesh: SovereignMesh) -> str:
     <section id="control" class="panel module" aria-label="OCP Control Deck module">
       <div class="module-head">
         <div>
-          <h2>OCP Control Deck</h2>
+          <h2>Advanced Control</h2>
           <p>Operate missions, queues, approvals, helpers, artifacts, treaties, and live mesh state from the phone.</p>
         </div>
-        <a class="open-link" href="/control">Open /control directly</a>
+        <a class="open-link" href="/control">Open advanced control</a>
       </div>
       <iframe title="OCP Control Deck" src="/control" loading="lazy"></iframe>
     </section>
@@ -577,34 +579,7 @@ def build_app_page(mesh: SovereignMesh) -> str:
   </main>
 
   <script>
-    const OCP_OPERATOR_TOKEN_KEY = "ocp_operator_token";
-    const consumeOperatorToken = () => {{
-      const hash = String(window.location.hash || "");
-      let token = "";
-      if (hash.startsWith("#ocp_operator_token=")) {{
-        token = decodeURIComponent(hash.slice("#ocp_operator_token=".length));
-      }} else if (hash.includes("ocp_operator_token=")) {{
-        token = new URLSearchParams(hash.replace(/^#/, "")).get("ocp_operator_token") || "";
-      }}
-      if (token) {{
-        try {{ window.localStorage.setItem(OCP_OPERATOR_TOKEN_KEY, token); }} catch (error) {{}}
-        history.replaceState(null, "", window.location.pathname + window.location.search);
-      }}
-    }};
-    const operatorToken = () => {{
-      try {{ return String(window.localStorage.getItem(OCP_OPERATOR_TOKEN_KEY) || "").trim(); }} catch (error) {{ return ""; }}
-    }};
-    const withOperatorAuth = (options = {{}}) => {{
-      const next = Object.assign({{}}, options || {{}});
-      const headers = new Headers(next.headers || {{}});
-      const token = operatorToken();
-      if (token && !headers.has("X-OCP-Operator-Token")) {{
-        headers.set("X-OCP-Operator-Token", token);
-      }}
-      next.headers = headers;
-      return next;
-    }};
-    consumeOperatorToken();
+{browser_client_js}
 
     const tabs = Array.from(document.querySelectorAll("[data-tab]"));
     const modules = Array.from(document.querySelectorAll(".module"));
@@ -653,15 +628,16 @@ def build_app_page(mesh: SovereignMesh) -> str:
     }};
     const renderStatus = (payload) => {{
       const quality = payload.mesh_quality || {{}};
+      const setup = payload.setup || {{}};
       const routeHealth = payload.route_health || {{}};
       const proof = payload.latest_proof || {{}};
       const urls = payload.app_urls || {{}};
-      setText(appEls.quality, text(quality.label, "Local node ready"));
-      setText(appEls.summary, text(quality.operator_summary || (payload.autonomy || {{}}).operator_summary, "Press Activate Autonomic Mesh to discover, repair, enlist, prove, and explain this mesh."));
+      setText(appEls.quality, text(setup.label || quality.label, "Local node ready"));
+      setText(appEls.summary, text(setup.operator_summary || quality.operator_summary || (payload.autonomy || {{}}).operator_summary, "Press Activate Mesh to discover, repair, enlist, prove, and explain this mesh."));
       setText(appEls.peers, String(quality.peer_count || 0));
       setText(appEls.routes, String(quality.healthy_routes || 0) + "/" + String(quality.route_count || 0));
       setText(appEls.proof, text(proof.status, "none"));
-      const phoneUrl = text(urls.phone_url || urls.app_url, window.location.origin + "/app");
+      const phoneUrl = withOperatorFragment(text(setup.phone_url || urls.phone_url || urls.app_url, window.location.origin + "/app"));
       setText(appEls.phone, phoneUrl);
       renderQr(phoneUrl);
       if (appEls.actions) {{
@@ -691,8 +667,7 @@ def build_app_page(mesh: SovereignMesh) -> str:
     }};
     const refreshAppStatus = async () => {{
       try {{
-        const response = await fetch("/mesh/app/status", withOperatorAuth());
-        const payload = await response.json();
+        const payload = await fetchJson("/mesh/app/status");
         renderStatus(payload);
         return payload;
       }} catch (error) {{
@@ -702,9 +677,9 @@ def build_app_page(mesh: SovereignMesh) -> str:
     }};
     document.querySelector("[data-refresh-status]")?.addEventListener("click", () => refreshAppStatus());
     document.querySelector("[data-copy-phone-link]")?.addEventListener("click", async () => {{
-      const value = text(appEls.phone?.textContent, window.location.origin + "/app");
+      const value = withOperatorFragment(text(appEls.phone?.textContent, window.location.origin + "/app"));
       try {{
-        await navigator.clipboard.writeText(value);
+        await copyText(value);
         setText(appEls.summary, "Copied phone link: " + value);
       }} catch (error) {{
         setText(appEls.summary, "Copy failed. Select the phone link manually.");
@@ -715,9 +690,9 @@ def build_app_page(mesh: SovereignMesh) -> str:
       button.disabled = true;
       const original = button.textContent;
       button.textContent = "Activating...";
-      setText(appEls.summary, "Autonomic Mesh is discovering, probing routes, planning helpers, and running a proof...");
+      setText(appEls.summary, "OCP is discovering nearby devices, probing routes, planning safe helpers, and running a proof...");
       try {{
-        const response = await fetch("/mesh/autonomy/activate", withOperatorAuth({{
+        const result = await fetchJson("/mesh/autonomy/activate", {{
           method: "POST",
           headers: {{ "Content-Type": "application/json" }},
           body: JSON.stringify({{
@@ -727,15 +702,11 @@ def build_app_page(mesh: SovereignMesh) -> str:
             repair: true,
             actor_agent_id: "ocp-app-home"
           }})
-        }}));
-        const result = await response.json();
-        if (!response.ok) {{
-          throw new Error(result.error || result.message || response.status + " " + response.statusText);
-        }}
-        setText(appEls.summary, result.operator_summary || result.summary || "Autonomic Mesh activation complete.");
+        }});
+        setText(appEls.summary, result.operator_summary || result.summary || "Mesh activation complete.");
         await refreshAppStatus();
       }} catch (error) {{
-        setText(appEls.summary, "Autonomic Mesh activation failed: " + error.message);
+        setText(appEls.summary, "Activate Mesh failed: " + error.message);
       }} finally {{
         button.disabled = false;
         button.textContent = original;
@@ -748,8 +719,7 @@ def build_app_page(mesh: SovereignMesh) -> str:
     fetchButton?.addEventListener("click", async () => {{
       preview.textContent = "Loading /mesh/contract...";
       try {{
-        const response = await fetch("/mesh/contract", withOperatorAuth());
-        const payload = await response.json();
+        const payload = await fetchJson("/mesh/contract");
         preview.textContent = JSON.stringify(payload, null, 2);
       }} catch (error) {{
         preview.textContent = "Unable to fetch /mesh/contract: " + error;

@@ -412,7 +412,7 @@ PROTOCOL_SCHEMAS: dict[str, dict[str, Any]] = {
     "AppStatus": {
         "type": "object",
         "description": "Operator-facing compact status for the installable OCP app home.",
-        "required": ["status", "node", "app_urls", "mesh_quality", "next_actions"],
+        "required": ["status", "node", "app_urls", "mesh_quality", "setup", "next_actions"],
         "properties": {
             "status": {"type": "string"},
             "node": {"type": "object"},
@@ -437,6 +437,24 @@ PROTOCOL_SCHEMAS: dict[str, dict[str, Any]] = {
                     "peer_count": {"type": "integer"},
                     "route_count": {"type": "integer"},
                     "healthy_routes": {"type": "integer"},
+                    "operator_summary": {"type": "string"},
+                },
+            },
+            "setup": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string"},
+                    "label": {"type": "string"},
+                    "primary_action": {"type": "string"},
+                    "bind_mode": {"type": "string"},
+                    "phone_url": {"type": "string"},
+                    "token_status": {"type": "string"},
+                    "known_peer_count": {"type": "integer"},
+                    "healthy_route_count": {"type": "integer"},
+                    "route_count": {"type": "integer"},
+                    "latest_proof_status": {"type": "string"},
+                    "blocking_issue": {"type": "string"},
+                    "next_fix": {"type": "string"},
                     "operator_summary": {"type": "string"},
                 },
             },

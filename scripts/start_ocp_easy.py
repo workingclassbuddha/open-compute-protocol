@@ -97,7 +97,10 @@ def main() -> int:
     args = parser.parse_args()
     repo_root = REPO_ROOT
     command = server_command(args, repo_root)
+    operator_token = (os.environ.get("OCP_OPERATOR_TOKEN") or os.environ.get("OCP_CONTROL_TOKEN") or "").strip()
     open_url = build_open_url(args.host, args.port, args.open_path)
+    if operator_token and args.open_path.strip("/") in {"", "app"}:
+        open_url = ocp_startup.operator_app_url(build_open_url(args.host, args.port, "/"), operator_token)
     profile = _profile_from_args(args, repo_root)
 
     print("Starting The Open Compute Protocol")
@@ -110,21 +113,26 @@ def main() -> int:
     print(f"  db:           {profile.db_path}")
     print(f"  identity:     {profile.identity_dir}")
     print(f"  workspace:    {profile.workspace_root}")
+    if not ocp_startup.port_is_available(args.host, args.port):
+        print()
+        print(f"Port {args.port} is already in use on {args.host}.")
+        print("Stop the other OCP server or choose a different OCP_PORT.")
+        return 2
     print()
     print("OCP app:")
     print(f"  {open_url}")
     print()
     print("Easy setup module:")
-    print(f"  {build_open_url(args.host, args.port, '/easy')}")
+    print(f"  {ocp_startup.operator_app_url(build_open_url(args.host, args.port, '/'), operator_token, path='/easy') if operator_token else build_open_url(args.host, args.port, '/easy')}")
     print()
     print("Advanced control module:")
-    print(f"  {build_open_url(args.host, args.port, '/control')}")
+    print(f"  {ocp_startup.operator_app_url(build_open_url(args.host, args.port, '/'), operator_token, path='/control') if operator_token else build_open_url(args.host, args.port, '/control')}")
     share_urls = share_urls_for_host(args.host, args.port)
     if share_urls:
         print()
         print("LAN share URLs:")
         for url in share_urls:
-            print(f"  {url}")
+            print(f"  {ocp_startup.operator_app_url(url, operator_token) if operator_token else url}")
     elif discover_local_ipv4_addresses(bind_host=args.host) and is_loopback_host(args.host):
         print()
         print("Detected local network IPs, but this node is local-only right now:")
