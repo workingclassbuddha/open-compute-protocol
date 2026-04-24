@@ -360,3 +360,117 @@ import Foundation
     let strongSteps = MissionControlDeriver.setupGuideSteps(snapshot: strong, mode: .mesh, phoneURL: "http://192.168.1.4:8421/app")
     #expect(strongSteps.allSatisfy { $0.status == "complete" })
 }
+
+@Test func proofAssistantStartsMeshThenSurfacesPhoneLink() throws {
+    let starting = ProofAssistantReducer.initial(mode: .local, phoneURL: "Start Mesh Mode")
+    #expect(starting.phase == .startingMesh)
+
+    let ready = try decodeSnapshot("""
+    {
+      "status": "ok",
+      "setup": {
+        "status": "ready",
+        "phone_url": "http://192.168.1.4:8421/app"
+      }
+    }
+    """)
+
+    let assistant = ProofAssistantReducer.status(
+        for: ready,
+        mode: .mesh,
+        phoneURL: "http://192.168.1.4:8421/app#ocp_operator_token=test",
+        currentPhase: .waitingForServer,
+        copiedPhoneLink: true
+    )
+    #expect(assistant.phase == .phoneLinkReady)
+    #expect(assistant.copiedPhoneLink)
+    #expect(assistant.phoneURL.contains("ocp_operator_token"))
+}
+
+@Test func proofAssistantMovesActivationIntoProofPolling() throws {
+    let proving = try decodeSnapshot("""
+    {
+      "status": "ok",
+      "setup": {
+        "status": "proving",
+        "latest_proof_status": "running",
+        "recovery_state": "repairing",
+        "next_fix": "Keep the second device open while proof runs."
+      },
+      "latest_proof": {"status": "running", "summary": "Whole-mesh proof is in flight."}
+    }
+    """)
+
+    let assistant = ProofAssistantReducer.status(
+        for: proving,
+        mode: .mesh,
+        phoneURL: "http://192.168.1.4:8421/app#ocp_operator_token=test",
+        currentPhase: .activating,
+        copiedPhoneLink: true
+    )
+
+    #expect(assistant.phase == .pollingProof)
+    #expect(assistant.message == "Whole-mesh proof is in flight.")
+}
+
+@Test func proofAssistantCompletesWhenSetupIsStrong() throws {
+    let strong = try decodeSnapshot("""
+    {
+      "status": "ok",
+      "setup": {
+        "status": "strong",
+        "operator_summary": "Mesh is strong.",
+        "latest_proof_status": "completed"
+      },
+      "latest_proof": {"status": "completed"}
+    }
+    """)
+
+    let assistant = ProofAssistantReducer.status(
+        for: strong,
+        mode: .mesh,
+        phoneURL: "http://192.168.1.4:8421/app#ocp_operator_token=test",
+        currentPhase: .pollingProof,
+        copiedPhoneLink: true
+    )
+
+    #expect(assistant.phase == .completed)
+    #expect(assistant.message == "Mesh is strong.")
+}
+
+@Test func proofAssistantNeedsAttentionForFailedProofWithNextFix() throws {
+    let failed = try decodeSnapshot("""
+    {
+      "status": "ok",
+      "setup": {
+        "status": "needs_attention",
+        "latest_proof_status": "failed",
+        "blocking_issue": "No second device responded.",
+        "next_fix": "Open the copied phone link on the second device."
+      },
+      "latest_proof": {"status": "failed", "summary": "Proof failed."}
+    }
+    """)
+
+    let assistant = ProofAssistantReducer.status(
+        for: failed,
+        mode: .mesh,
+        phoneURL: "http://192.168.1.4:8421/app#ocp_operator_token=test",
+        currentPhase: .pollingProof,
+        copiedPhoneLink: true
+    )
+
+    #expect(assistant.phase == .needsAttention)
+    #expect(assistant.message == "Open the copied phone link on the second device.")
+    #expect(assistant.detail == "No second device responded.")
+}
+
+@Test func proofAssistantFailsOnServerStartupTimeout() {
+    let assistant = ProofAssistantReducer.startupTimeout(seconds: 20)
+    #expect(assistant.phase == .failed)
+    #expect(assistant.message.contains("/mesh/app/status"))
+}
+
+private func decodeSnapshot(_ json: String) throws -> AppStatusSnapshot {
+    try JSONDecoder().decode(AppStatusSnapshot.self, from: Data(json.utf8))
+}

@@ -19,6 +19,8 @@ struct OverviewView: View {
                 meshScore: model.meshScore,
                 phoneURL: model.phoneURL,
                 isActivating: model.isActivating,
+                proofAssistant: model.proofAssistant,
+                isProofAssistantRunning: model.isProofAssistantRunning,
                 recoveryLabel: demo.recoveryLabel,
                 recoverySummary: demo.recoverySummary,
                 proofLabel: demo.proofLabel,
@@ -27,9 +29,22 @@ struct OverviewView: View {
                 primaryPeerSummary: demo.primaryPeerSummary,
                 story: demo.story,
                 allowMotion: allowMotion,
+                runProofAssistant: { model.runProofAssistant() },
                 startMesh: { model.startMesh() },
                 activateMesh: { model.activateMesh() },
                 copyPhoneLink: { model.copyPhoneLink() },
+                openApp: { model.openApp() }
+            )
+
+            ProofAssistantCard(
+                status: model.proofAssistant,
+                phoneURL: model.phoneURL,
+                timeline: model.snapshot?.setup?.timeline ?? [],
+                isActivating: model.isActivating,
+                runProofAssistant: { model.runProofAssistant() },
+                startMesh: { model.startMesh() },
+                copyPhoneLink: { model.copyPhoneLink() },
+                activateMesh: { model.activateMesh() },
                 openApp: { model.openApp() }
             )
 

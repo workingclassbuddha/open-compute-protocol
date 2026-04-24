@@ -12,6 +12,9 @@ struct OCPDesktopApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandMenu("Mesh") {
+                Button("Run Proof Assistant") { model.runProofAssistant() }
+                    .keyboardShortcut("p", modifiers: [.command, .shift])
+                    .disabled(model.isProofAssistantRunning)
                 Button("Activate Mesh") { model.activateMesh() }
                     .keyboardShortcut("a", modifiers: [.command, .shift])
                     .disabled(model.isActivating)

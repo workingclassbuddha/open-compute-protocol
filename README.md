@@ -221,6 +221,22 @@ swift run OCPDesktop
 
 This native Mission Control shell uses the same OCP server, state paths, operator-token phone links, app-status polling, persisted app-history samples, charts, client-derived route topology, guided setup, and default-worker startup behavior as the Python launcher.
 
+### Native Proof Assistant
+
+The native Mac app now includes a one-click Proof Assistant for the two-device OCP proof. Launch the app, then click **Run Proof Assistant** from the Overview, Setup Doctor, toolbar, or Mesh menu.
+
+The assistant runs the no-terminal path end to end:
+
+1. Generates and persists an operator token if needed.
+2. Starts Mesh Mode when the server is not already running in mesh mode.
+3. Waits for `/mesh/app/status` to become reachable.
+4. Copies the tokened phone link once for the run and shows it in the app.
+5. Calls the existing Autonomic Mesh activation flow with proof and repair enabled.
+6. Polls status until setup becomes `strong`, OCP reports a proof issue, or the proof times out with a concrete next fix.
+7. Records one app-history sample at the end so the Mission Control charts reflect the run.
+
+No server routes or schemas are added for this flow. The native assistant only orchestrates the existing `/mesh/app/status`, `/mesh/app/history`, `/mesh/app/history/sample`, and `/mesh/autonomy/activate` endpoints. The individual Start Mesh, Copy Phone Link, Activate Mesh, and Open App controls remain available as secondary controls.
+
 Unsigned macOS beta bundle:
 
 ```bash

@@ -16,6 +16,18 @@ struct SetupDoctorView: View {
 
             DemoStatusStrip(state: demo, roles: model.deviceRoles)
 
+            ProofAssistantCard(
+                status: model.proofAssistant,
+                phoneURL: model.phoneURL,
+                timeline: model.snapshot?.setup?.timeline ?? [],
+                isActivating: model.isActivating,
+                runProofAssistant: { model.runProofAssistant() },
+                startMesh: { model.startMesh() },
+                copyPhoneLink: { model.copyPhoneLink() },
+                activateMesh: { model.activateMesh() },
+                openApp: { model.openApp() }
+            )
+
             SetupGuideCard(
                 steps: model.setupGuideSteps,
                 allowMotion: allowMotion,
@@ -46,9 +58,14 @@ struct SetupDoctorView: View {
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                     HStack {
-                        Button("Activate Mesh") { model.activateMesh() }
+                        Button("Run Proof Assistant") { model.runProofAssistant() }
                             .buttonStyle(.borderedProminent)
+                            .disabled(model.isProofAssistantRunning)
+                        Button("Activate Mesh") { model.activateMesh() }
+                            .buttonStyle(.bordered)
+                            .disabled(model.isActivating)
                         Button("Copy Phone Link") { model.copyPhoneLink() }
+                            .buttonStyle(.bordered)
                     }
                 }
             }
