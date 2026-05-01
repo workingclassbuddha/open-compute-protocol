@@ -1,0 +1,77 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "open-compute-protocol"
+version = "0.1.7.dev0"
+description = "A sovereign, local-first compute fabric for trusted devices."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "AGPL-3.0-or-later"
+authors = [
+  { name = "Open Compute Protocol contributors" }
+]
+keywords = [
+  "local-first",
+  "mesh",
+  "compute",
+  "protocol",
+  "sovereign",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+  "Topic :: System :: Distributed Computing",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/workingclassbuddha/open-compute-protocol"
+Repository = "https://github.com/workingclassbuddha/open-compute-protocol"
+Issues = "https://github.com/workingclassbuddha/open-compute-protocol/issues"
+Documentation = "https://github.com/workingclassbuddha/open-compute-protocol/tree/main/docs"
+
+[project.scripts]
+ocp = "server:main"
+ocp-easy = "scripts.start_ocp_easy:main"
+
+[tool.setuptools]
+packages = [
+  "mesh",
+  "mesh_artifacts",
+  "mesh_autonomy",
+  "mesh_execution",
+  "mesh_governance",
+  "mesh_helpers",
+  "mesh_missions",
+  "mesh_protocol",
+  "mesh_scheduler",
+  "mesh_state",
+  "ocp_desktop",
+  "scripts",
+]
+py-modules = [
+  "ocp_startup",
+  "runtime",
+  "server",
+  "server_app",
+  "server_app_history",
+  "server_app_status",
+  "server_artifacts",
+  "server_browser_client",
+  "server_connect",
+  "server_contract",
+  "server_control",
+  "server_control_page",
+  "server_http_handlers",
+  "server_missions",
+  "server_ops",
+  "server_routes",
+  "server_runtime",
+]
+include-package-data = true

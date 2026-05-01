@@ -6400,7 +6400,19 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("RouteHealth", snapshot["schemas"])
         self.assertIn("AppStatus", snapshot["schemas"])
         self.assertIn("AppStatusHistory", snapshot["schemas"])
+        self.assertIn("QueueEventList", snapshot["schemas"])
+        self.assertIn("MissionList", snapshot["schemas"])
+        self.assertIn("WorkerList", snapshot["schemas"])
+        self.assertIn("ArtifactList", snapshot["schemas"])
+        self.assertIn("Object", snapshot["schemas"])
         self.assertIn("ProtocolConformanceSnapshot", snapshot["schemas"])
+        unresolved_response_refs = [
+            endpoint["id"]
+            for endpoint in endpoints
+            if endpoint.get("response", {}).get("schema_ref")
+            and not endpoint["response"].get("schema_available", False)
+        ]
+        self.assertEqual([], unresolved_response_refs)
         self.assertIn("runtime", snapshot["groups"])
         self.assertIn("missions", snapshot["groups"])
         self.assertIn("ops", snapshot["groups"])
@@ -6427,10 +6439,13 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertEqual(queue_events["request"]["query"]["since"], "integer")
         self.assertEqual(queue_events["request"]["query"]["since_seq"], "integer")
         self.assertEqual(queue_events["response"]["schema_ref"], "QueueEventList")
+        self.assertTrue(queue_events["response"]["schema_available"])
 
         ack_deadline = server_contract.contract_for("POST", "/mesh/queue/ack-deadline")
         self.assertEqual(ack_deadline["request"]["body"]["ttl_seconds"], "integer")
         self.assertEqual(ack_deadline["request"]["body"]["ack_deadline_seconds"], "integer")
+        self.assertEqual(ack_deadline["response"]["schema_ref"], "Object")
+        self.assertTrue(ack_deadline["response"]["schema_available"])
 
         manifest_contract = server_contract.contract_for("GET", "/mesh/manifest")
         self.assertEqual(manifest_contract["response"]["schema_ref"], "MeshManifest")
@@ -6491,6 +6506,9 @@ class SovereignMeshTests(unittest.TestCase):
         self.assertIn("ExecutionReadiness", list_protocol_schemas())
         self.assertIn("WorkerCapacity", list_protocol_schemas())
         self.assertIn("SetupTimelineEvent", list_protocol_schemas())
+        self.assertIn("QueueEventList", list_protocol_schemas())
+        self.assertIn("ArtifactList", list_protocol_schemas())
+        self.assertIn("Object", list_protocol_schemas())
         self.assertIn("ProtocolConformanceSnapshot", list_protocol_schemas())
 
         conformance = snapshot["conformance"]

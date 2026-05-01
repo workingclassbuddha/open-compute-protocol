@@ -12,6 +12,8 @@ final class OCPDesktopModel: ObservableObject {
     @Published var history = AppStatusHistory.empty
     @Published var isRunning = false
     @Published var isActivating = false
+    @Published var isProofAssistantRunning = false
+    @Published var proofAssistant = ProofAssistantStatus.idle
 
     let repoRoot: URL
     let paths: LaunchPaths
@@ -154,6 +156,14 @@ final class OCPDesktopModel: ObservableObject {
         }
     }
 
+    func runProofAssistant() {
+        guard !isProofAssistantRunning else { return }
+        isProofAssistantRunning = true
+        Task {
+            await runProofAssistantFlow()
+        }
+    }
+
     func saveConfig() {
         let normalized = config.normalized(defaultNodeID: LauncherCore.defaultNodeID())
         config = normalized
@@ -179,6 +189,178 @@ final class OCPDesktopModel: ObservableObject {
                 statusText = "OCP is starting or not reachable yet..."
             }
         }
+    }
+
+    private func runProofAssistantFlow() async {
+        var copiedPhoneLink = false
+        defer {
+            isProofAssistantRunning = false
+            isActivating = false
+        }
+
+        ensureOperatorToken()
+        proofAssistant = ProofAssistantReducer.initial(mode: currentMode, phoneURL: phoneURL)
+        statusText = proofAssistant.message
+
+        if currentMode != .mesh || !isRunning {
+            startMesh()
+        } else {
+            refreshStaticLinks(mode: .mesh)
+        }
+
+        proofAssistant = ProofAssistantReducer.waitingForServer(phoneURL: phoneURL)
+        statusText = proofAssistant.message
+
+        let firstSnapshot: AppStatusSnapshot
+        do {
+            firstSnapshot = try await waitForReachableServer(timeout: 20)
+        } catch ProofAssistantRunError.startupTimeout {
+            proofAssistant = ProofAssistantReducer.startupTimeout(seconds: 20)
+            statusText = proofAssistant.message
+            await recordHistorySample(preserveStatus: true)
+            return
+        } catch {
+            proofAssistant = ProofAssistantReducer.failure(
+                "Could not reach OCP: \(error.localizedDescription)",
+                detail: "Start Mesh Mode manually or check the configured port, then run the assistant again.",
+                phoneURL: phoneURL
+            )
+            statusText = proofAssistant.message
+            await recordHistorySample(preserveStatus: true)
+            return
+        }
+
+        apply(firstSnapshot)
+        copiedPhoneLink = copyProofAssistantPhoneLinkIfReady()
+        proofAssistant = ProofAssistantReducer.phoneLinkReady(phoneURL: phoneURL, copiedPhoneLink: copiedPhoneLink)
+        statusText = proofAssistant.message
+
+        proofAssistant = ProofAssistantReducer.activating(phoneURL: phoneURL, copiedPhoneLink: copiedPhoneLink)
+        statusText = proofAssistant.message
+        isActivating = true
+
+        do {
+            try await client().activateMesh()
+        } catch {
+            isActivating = false
+            proofAssistant = ProofAssistantReducer.failure(
+                "Activate Mesh failed: \(error.localizedDescription)",
+                detail: nextFix,
+                phoneURL: phoneURL,
+                copiedPhoneLink: copiedPhoneLink
+            )
+            statusText = proofAssistant.message
+            await recordHistorySample(preserveStatus: true)
+            return
+        }
+
+        isActivating = false
+        proofAssistant = ProofAssistantStatus(
+            phase: .pollingProof,
+            title: "Polling proof",
+            message: "Activation completed. The assistant is watching for strong mesh status.",
+            phoneURL: phoneURL,
+            copiedPhoneLink: copiedPhoneLink
+        )
+        statusText = proofAssistant.message
+
+        let finalStatus = await pollProofUntilDone(timeout: 90, copiedPhoneLink: copiedPhoneLink)
+        proofAssistant = finalStatus
+        statusText = finalStatus.message
+        await recordHistorySample(preserveStatus: true)
+    }
+
+    private func waitForReachableServer(timeout: TimeInterval) async throws -> AppStatusSnapshot {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastError: Error?
+
+        while Date() < deadline {
+            do {
+                let next = try await client().fetchStatus()
+                apply(next)
+                try? await refreshHistory()
+                return next
+            } catch {
+                lastError = error
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
+
+        if lastError != nil {
+            throw ProofAssistantRunError.startupTimeout
+        }
+        throw ProofAssistantRunError.startupTimeout
+    }
+
+    private func pollProofUntilDone(timeout: TimeInterval, copiedPhoneLink: Bool) async -> ProofAssistantStatus {
+        let deadline = Date().addingTimeInterval(timeout)
+        var latestSnapshot = snapshot
+
+        while Date() < deadline {
+            do {
+                let next = try await client().fetchStatus()
+                latestSnapshot = next
+                apply(next)
+                try? await refreshHistory()
+                let reduced = ProofAssistantReducer.status(
+                    for: next,
+                    mode: currentMode,
+                    phoneURL: phoneURL,
+                    currentPhase: .pollingProof,
+                    copiedPhoneLink: copiedPhoneLink
+                )
+
+                switch reduced.phase {
+                case .completed, .needsAttention, .failed:
+                    return reduced
+                default:
+                    proofAssistant = reduced.phase == .pollingProof ? reduced : ProofAssistantStatus(
+                        phase: .pollingProof,
+                        title: "Polling proof",
+                        message: reduced.message,
+                        detail: reduced.detail.isEmpty ? "Waiting for OCP to report strong status or a concrete fix." : reduced.detail,
+                        phoneURL: reduced.phoneURL,
+                        copiedPhoneLink: copiedPhoneLink
+                    )
+                    statusText = proofAssistant.message
+                }
+            } catch {
+                proofAssistant = ProofAssistantStatus(
+                    phase: .pollingProof,
+                    title: "Polling proof",
+                    message: "Status polling is retrying: \(error.localizedDescription)",
+                    detail: "The assistant will keep trying until the proof timeout.",
+                    phoneURL: phoneURL,
+                    copiedPhoneLink: copiedPhoneLink
+                )
+                statusText = proofAssistant.message
+            }
+
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+        }
+
+        return ProofAssistantReducer.proofTimeout(
+            snapshot: latestSnapshot,
+            phoneURL: phoneURL,
+            copiedPhoneLink: copiedPhoneLink
+        )
+    }
+
+    private func ensureOperatorToken() {
+        guard config.operatorToken.isEmpty else { return }
+        config.operatorToken = Self.generateToken()
+        let normalized = config.normalized(defaultNodeID: LauncherCore.defaultNodeID())
+        config = normalized
+        try? LauncherCore.saveConfig(normalized, to: paths.configPath)
+    }
+
+    private func copyProofAssistantPhoneLinkIfReady() -> Bool {
+        let value = phoneURL.hasPrefix("http") ? phoneURL : appLink(for: .mesh)
+        guard value.hasPrefix("http") else { return false }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
+        phoneURL = value
+        return true
     }
 
     private func start(mode: LaunchMode) {
@@ -227,16 +409,17 @@ final class OCPDesktopModel: ObservableObject {
         history = try await client().fetchHistory(limit: 240)
     }
 
-    private func recordHistorySample() async {
+    private func recordHistorySample(preserveStatus: Bool = false) async {
         guard !isSampling else { return }
         isSampling = true
+        let previousStatus = statusText
         defer { isSampling = false }
         do {
             _ = try await client().recordHistorySample()
             lastSampleAt = Date()
             try await refreshHistory()
         } catch {
-            statusText = "Status is live, but history sampling failed: \(error.localizedDescription)"
+            statusText = preserveStatus ? previousStatus : "Status is live, but history sampling failed: \(error.localizedDescription)"
         }
     }
 
@@ -270,4 +453,8 @@ final class OCPDesktopModel: ObservableObject {
     private static func generateToken() -> String {
         "\(UUID().uuidString.lowercased())-\(UUID().uuidString.lowercased())"
     }
+}
+
+private enum ProofAssistantRunError: Error {
+    case startupTimeout
 }

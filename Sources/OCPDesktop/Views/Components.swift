@@ -268,6 +268,8 @@ struct CinematicOverviewHero: View {
     var meshScore: Int
     var phoneURL: String
     var isActivating: Bool
+    var proofAssistant: ProofAssistantStatus
+    var isProofAssistantRunning: Bool
     var recoveryLabel: String
     var recoverySummary: String
     var proofLabel: String
@@ -276,6 +278,7 @@ struct CinematicOverviewHero: View {
     var primaryPeerSummary: String
     var story: [String]
     var allowMotion: Bool
+    var runProofAssistant: () -> Void
     var startMesh: () -> Void
     var activateMesh: () -> Void
     var copyPhoneLink: () -> Void
@@ -369,6 +372,7 @@ struct CinematicOverviewHero: View {
                                 .textCase(.uppercase)
                         }
                         VStack(alignment: .leading, spacing: 12) {
+                            HeroDetailBlock(title: "Assistant", value: proofAssistant.phaseLabel, summary: proofAssistant.message)
                             HeroDetailBlock(title: "Recovery", value: recoveryLabel, summary: recoverySummary)
                             HeroDetailBlock(title: "Proof", value: proofLabel, summary: proofSummary)
                             HeroDetailBlock(title: "Primary Peer", value: primaryPeerLabel, summary: primaryPeerSummary)
@@ -389,18 +393,25 @@ struct CinematicOverviewHero: View {
                 HeroDeviceScene(allowMotion: allowMotion)
 
                 HStack(spacing: 12) {
-                    Button("Activate Mesh") {
-                        activateMesh()
+                    Button("Run Proof Assistant") {
+                        runProofAssistant()
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
-                    .disabled(isActivating)
+                    .disabled(isProofAssistantRunning)
 
                     Button("Start Mesh Mode") {
                         startMesh()
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.large)
+
+                    Button("Activate Mesh") {
+                        activateMesh()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .disabled(isActivating)
 
                     Button("Copy Phone Link") {
                         copyPhoneLink()
@@ -453,6 +464,154 @@ struct CinematicOverviewHero: View {
         if meshScore >= 80 { return MissionTheme.mint }
         if meshScore >= 50 { return MissionTheme.copper }
         return MissionTheme.ember
+    }
+}
+
+struct ProofAssistantCard: View {
+    var status: ProofAssistantStatus
+    var phoneURL: String
+    var timeline: [AppStatusSnapshot.TimelineEvent]
+    var isActivating: Bool
+    var runProofAssistant: () -> Void
+    var startMesh: () -> Void
+    var copyPhoneLink: () -> Void
+    var activateMesh: () -> Void
+    var openApp: () -> Void
+
+    var body: some View {
+        MissionCard(tint: tint) {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Proof Assistant").sectionLabel()
+                        Text(status.title)
+                            .font(.title3.weight(.bold))
+                    }
+                    Spacer()
+                    StatusPill(text: status.phaseLabel, status: status.statusToken)
+                }
+
+                Text(status.message)
+                    .font(.headline)
+                    .foregroundStyle(MissionTheme.cream.opacity(0.82))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !status.detail.isEmpty {
+                    Label(status.detail, systemImage: detailIcon)
+                        .font(.callout)
+                        .foregroundStyle(detailColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Image(systemName: status.copiedPhoneLink ? "checkmark.square" : "iphone")
+                            .foregroundStyle(status.copiedPhoneLink ? MissionTheme.mint : MissionTheme.signal)
+                        Text(status.copiedPhoneLink ? "Phone link copied" : "Phone link")
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(linkText)
+                        .font(.callout.monospaced())
+                        .lineLimit(2)
+                        .textSelection(.enabled)
+                        .foregroundStyle(MissionTheme.cream.opacity(linkText.hasPrefix("http") ? 0.82 : 0.58))
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                HStack(spacing: 10) {
+                    Button {
+                        runProofAssistant()
+                    } label: {
+                        Label(status.isRunning ? "Running" : "Run Proof Assistant", systemImage: "checkmark.seal")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(status.isRunning)
+
+                    Button {
+                        startMesh()
+                    } label: {
+                        Label("Start Mesh", systemImage: "network")
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button {
+                        activateMesh()
+                    } label: {
+                        Label("Activate", systemImage: "bolt.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isActivating)
+
+                    Button {
+                        copyPhoneLink()
+                    } label: {
+                        Label("Copy Link", systemImage: "doc.on.doc")
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button {
+                        openApp()
+                    } label: {
+                        Label("Open", systemImage: "safari")
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                if !timeline.isEmpty {
+                    Divider().opacity(0.36)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Live Proof Timeline").sectionLabel()
+                        TimelineList(events: Array(timeline.prefix(5)))
+                    }
+                }
+            }
+        }
+    }
+
+    private var linkText: String {
+        if !status.phoneURL.isEmpty { return status.phoneURL }
+        return phoneURL
+    }
+
+    private var tint: Color {
+        switch status.phase {
+        case .completed:
+            return MissionTheme.mint
+        case .needsAttention:
+            return MissionTheme.copper
+        case .failed:
+            return MissionTheme.ember
+        default:
+            return MissionTheme.signal
+        }
+    }
+
+    private var detailIcon: String {
+        switch status.phase {
+        case .completed:
+            return "checkmark.circle"
+        case .needsAttention, .failed:
+            return "exclamationmark.triangle"
+        default:
+            return "info.circle"
+        }
+    }
+
+    private var detailColor: Color {
+        switch status.phase {
+        case .completed:
+            return MissionTheme.mint
+        case .needsAttention:
+            return MissionTheme.copper
+        case .failed:
+            return MissionTheme.ember
+        default:
+            return .secondary
+        }
     }
 }
 

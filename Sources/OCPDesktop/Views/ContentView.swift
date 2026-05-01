@@ -35,6 +35,12 @@ struct ContentView: View {
                             Label("Mesh", systemImage: "network")
                         }
                         Button {
+                            model.runProofAssistant()
+                        } label: {
+                            Label("Proof Assistant", systemImage: "checkmark.seal")
+                        }
+                            .disabled(model.isProofAssistantRunning)
+                        Button {
                             model.activateMesh()
                         } label: {
                             Label("Activate", systemImage: "bolt.circle")

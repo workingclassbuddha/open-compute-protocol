@@ -29,6 +29,11 @@ def main() -> int:
         for endpoint in snapshot.get("endpoints", [])
         if endpoint.get("response", {}).get("schema_ref") and not endpoint["response"].get("schema_available", False)
     ]
+    generic_response_refs = [
+        endpoint["id"]
+        for endpoint in snapshot.get("endpoints", [])
+        if endpoint.get("response", {}).get("schema_ref") == "Object"
+    ]
 
     errors: list[str] = []
     if snapshot.get("status") != "ok":
@@ -46,9 +51,16 @@ def main() -> int:
         f"Protocol conformance snapshot: endpoints={snapshot.get('endpoint_count', 0)} "
         f"schemas={snapshot.get('schema_count', 0)} "
         f"fixtures={conformance.get('fixture_count', 0)} "
-        f"unresolved_response_refs={len(unresolved_response_refs)}"
+        f"unresolved_response_refs={len(unresolved_response_refs)} "
+        f"generic_response_refs={len(generic_response_refs)}"
     )
     print(summary)
+
+    if generic_response_refs:
+        preview = ", ".join(generic_response_refs[:10])
+        remainder = len(generic_response_refs) - min(len(generic_response_refs), 10)
+        suffix = f" (+{remainder} more)" if remainder > 0 else ""
+        print(f"Response schema coverage still generic: {preview}{suffix}")
 
     if unresolved_response_refs:
         preview = ", ".join(unresolved_response_refs[:10])

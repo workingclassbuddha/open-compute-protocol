@@ -1,0 +1,137 @@
+<svg width="1440" height="760" viewBox="0 0 1440 760" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">OCP Native Proof Assistant</title>
+  <desc id="desc">A native Mac Proof Assistant flow showing Mesh Mode startup, copied phone link, activation, proof polling, and strong mesh completion.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1440" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#061315"/>
+      <stop offset="0.48" stop-color="#0B2A27"/>
+      <stop offset="1" stop-color="#140D08"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="120" y1="104" x2="1030" y2="644" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#122D2B"/>
+      <stop offset="0.58" stop-color="#071415"/>
+      <stop offset="1" stop-color="#1A120C"/>
+    </linearGradient>
+    <linearGradient id="proof" x1="156" y1="179" x2="838" y2="439" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#173A36"/>
+      <stop offset="1" stop-color="#0A1718"/>
+    </linearGradient>
+    <linearGradient id="button" x1="180" y1="368" x2="410" y2="420" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5DF0B3"/>
+      <stop offset="1" stop-color="#C4F37B"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1116 214) rotate(120) scale(420 500)">
+      <stop stop-color="#62F6C3" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#62F6C3" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="softShadow" x="78" y="64" width="1030" height="632" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="24"/>
+      <feGaussianBlur stdDeviation="24"/>
+      <feComposite in2="hardAlpha" operator="out"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.02 0 0 0 0 0.09 0 0 0 0 0.08 0 0 0 0.45 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow" result="shape"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5DF0B3"/>
+    </marker>
+  </defs>
+
+  <rect width="1440" height="760" rx="38" fill="url(#bg)"/>
+  <rect width="1440" height="760" rx="38" fill="url(#glow)"/>
+
+  <g opacity="0.14">
+    <path d="M44 610 C272 426 412 529 616 325 C838 103 1076 222 1378 88" stroke="#F4C46A" stroke-width="2"/>
+    <path d="M62 210 C286 356 472 208 650 368 C838 537 1042 462 1358 598" stroke="#5DF0B3" stroke-width="2"/>
+    <path d="M180 86 L1260 674" stroke="#FFFFFF" stroke-width="1"/>
+    <path d="M42 438 L1392 300" stroke="#FFFFFF" stroke-width="1"/>
+  </g>
+
+  <g filter="url(#softShadow)">
+    <rect x="120" y="94" width="920" height="560" rx="28" fill="url(#panel)" stroke="#5DF0B3" stroke-opacity="0.32"/>
+    <rect x="120" y="94" width="920" height="56" rx="28" fill="#071314"/>
+    <rect x="120" y="124" width="920" height="26" fill="#071314"/>
+    <circle cx="156" cy="122" r="7" fill="#F46D61"/>
+    <circle cx="180" cy="122" r="7" fill="#F4C46A"/>
+    <circle cx="204" cy="122" r="7" fill="#5DF0B3"/>
+    <text x="520" y="128" fill="#D9FBEF" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="14" font-weight="700" text-anchor="middle" letter-spacing="1.8">OCP DESKTOP MISSION CONTROL</text>
+
+    <rect x="156" y="178" width="660" height="276" rx="24" fill="url(#proof)" stroke="#FFFFFF" stroke-opacity="0.12"/>
+    <text x="180" y="222" fill="#5DF0B3" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="13" font-weight="800" letter-spacing="2.2">NATIVE PROOF ASSISTANT</text>
+    <text x="180" y="266" fill="#F4F1E8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="42" font-weight="900">Run the mesh proof</text>
+    <text x="180" y="300" fill="#B8C9C4" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="18" font-weight="600">Start Mesh Mode, copy the phone link, activate, and watch</text>
+    <text x="180" y="326" fill="#B8C9C4" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="18" font-weight="600">for strong status without terminal commands.</text>
+    <rect x="180" y="366" width="240" height="54" rx="16" fill="url(#button)"/>
+    <text x="300" y="400" fill="#061315" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="17" font-weight="900" text-anchor="middle">Run Proof Assistant</text>
+
+    <rect x="462" y="366" width="132" height="54" rx="16" fill="#0B1D1E" stroke="#5DF0B3" stroke-opacity="0.42"/>
+    <text x="528" y="399" fill="#D9FBEF" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="15" font-weight="800" text-anchor="middle">Start Mesh</text>
+    <rect x="610" y="366" width="120" height="54" rx="16" fill="#0B1D1E" stroke="#5DF0B3" stroke-opacity="0.42"/>
+    <text x="670" y="399" fill="#D9FBEF" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="15" font-weight="800" text-anchor="middle">Copy Link</text>
+
+    <rect x="846" y="178" width="154" height="276" rx="24" fill="#0A1718" stroke="#F4C46A" stroke-opacity="0.30"/>
+    <text x="923" y="220" fill="#F4C46A" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12" font-weight="800" letter-spacing="1.8" text-anchor="middle">PHASE</text>
+    <text x="923" y="258" fill="#F4F1E8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="20" font-weight="900" text-anchor="middle">Polling Proof</text>
+    <circle cx="923" cy="326" r="48" fill="#0E2B28" stroke="#5DF0B3" stroke-width="8" stroke-dasharray="210 92" stroke-linecap="round"/>
+    <text x="923" y="334" fill="#5DF0B3" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="22" font-weight="900" text-anchor="middle">82</text>
+    <text x="923" y="398" fill="#B8C9C4" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="13" font-weight="700" text-anchor="middle">mesh score</text>
+
+    <rect x="156" y="486" width="844" height="124" rx="22" fill="#071314" stroke="#FFFFFF" stroke-opacity="0.12"/>
+    <text x="180" y="523" fill="#5DF0B3" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="13" font-weight="800" letter-spacing="2.0">LIVE PROOF TIMELINE</text>
+    <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
+      <circle cx="204" cy="566" r="12" fill="#5DF0B3"/>
+      <text x="204" y="571" fill="#061315" font-size="13" font-weight="900" text-anchor="middle">1</text>
+      <text x="230" y="562" fill="#F4F1E8" font-size="15" font-weight="800">Mesh Mode</text>
+      <text x="230" y="584" fill="#8EA39D" font-size="13" font-weight="600">server ready</text>
+
+      <path d="M350 566 L410 566" stroke="#5DF0B3" stroke-width="2" marker-end="url(#arrow)"/>
+      <circle cx="444" cy="566" r="12" fill="#5DF0B3"/>
+      <text x="444" y="571" fill="#061315" font-size="13" font-weight="900" text-anchor="middle">2</text>
+      <text x="470" y="562" fill="#F4F1E8" font-size="15" font-weight="800">Phone Link</text>
+      <text x="470" y="584" fill="#8EA39D" font-size="13" font-weight="600">copied once</text>
+
+      <path d="M590 566 L650 566" stroke="#5DF0B3" stroke-width="2" marker-end="url(#arrow)"/>
+      <circle cx="684" cy="566" r="12" fill="#5DF0B3"/>
+      <text x="684" y="571" fill="#061315" font-size="13" font-weight="900" text-anchor="middle">3</text>
+      <text x="710" y="562" fill="#F4F1E8" font-size="15" font-weight="800">Activate</text>
+      <text x="710" y="584" fill="#8EA39D" font-size="13" font-weight="600">repair enabled</text>
+
+      <path d="M812 566 L872 566" stroke="#5DF0B3" stroke-width="2" marker-end="url(#arrow)"/>
+      <circle cx="906" cy="566" r="12" fill="#F4C46A"/>
+      <text x="906" y="571" fill="#061315" font-size="13" font-weight="900" text-anchor="middle">4</text>
+      <text x="932" y="562" fill="#F4F1E8" font-size="15" font-weight="800">Strong or Fix</text>
+      <text x="932" y="584" fill="#8EA39D" font-size="13" font-weight="600">final state</text>
+    </g>
+  </g>
+
+  <g>
+    <rect x="1088" y="132" width="238" height="500" rx="46" fill="#071314" stroke="#D9FBEF" stroke-opacity="0.32" stroke-width="3"/>
+    <rect x="1108" y="158" width="198" height="448" rx="34" fill="#0B1D1E"/>
+    <rect x="1160" y="148" width="94" height="12" rx="6" fill="#132C2B"/>
+    <text x="1207" y="216" fill="#5DF0B3" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12" font-weight="900" letter-spacing="2.0" text-anchor="middle">PHONE LINK</text>
+    <rect x="1132" y="244" width="150" height="150" rx="20" fill="#F4F1E8"/>
+    <g fill="#061315">
+      <rect x="1152" y="264" width="24" height="24" rx="3"/>
+      <rect x="1238" y="264" width="24" height="24" rx="3"/>
+      <rect x="1152" y="350" width="24" height="24" rx="3"/>
+      <rect x="1195" y="292" width="14" height="14" rx="2"/>
+      <rect x="1218" y="292" width="14" height="14" rx="2"/>
+      <rect x="1184" y="318" width="14" height="14" rx="2"/>
+      <rect x="1212" y="322" width="28" height="14" rx="2"/>
+      <rect x="1188" y="350" width="16" height="16" rx="2"/>
+      <rect x="1216" y="350" width="14" height="14" rx="2"/>
+      <rect x="1244" y="350" width="18" height="18" rx="2"/>
+      <rect x="1154" y="304" width="18" height="18" rx="2"/>
+      <rect x="1238" y="308" width="24" height="14" rx="2"/>
+    </g>
+    <text x="1207" y="440" fill="#F4F1E8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="21" font-weight="900" text-anchor="middle">Second device</text>
+    <text x="1207" y="470" fill="#B8C9C4" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="15" font-weight="650" text-anchor="middle">opens copied link</text>
+    <rect x="1130" y="510" width="154" height="42" rx="14" fill="#0E2B28" stroke="#5DF0B3" stroke-opacity="0.42"/>
+    <text x="1207" y="537" fill="#5DF0B3" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="15" font-weight="900" text-anchor="middle">Token protected</text>
+  </g>
+
+  <path d="M1028 326 C1070 292 1098 280 1132 302" stroke="#5DF0B3" stroke-width="3" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <path d="M1132 536 C1052 640 770 690 504 632" stroke="#F4C46A" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="10 12"/>
+</svg>

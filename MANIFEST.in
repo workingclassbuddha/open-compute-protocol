@@ -1,0 +1,7 @@
+include LICENSE README.md SECURITY.md
+recursive-include docs *
+recursive-include scripts *
+recursive-include assets *
+recursive-include Sources *
+recursive-include tests *
+global-exclude __pycache__ *.py[cod] .DS_Store
