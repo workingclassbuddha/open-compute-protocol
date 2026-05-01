@@ -7,6 +7,7 @@ This is the fastest way to get **The Open Compute Protocol** running locally.
 ```bash
 git clone https://github.com/workingclassbuddha/open-compute-protocol.git
 cd open-compute-protocol
+python3 -m pip install -e .
 ```
 
 ## 2. Start one local node
@@ -116,6 +117,8 @@ Bind so another machine on your network can reach it:
 ```bash
 OCP_HOST=0.0.0.0 ./scripts/start_ocp.sh
 ```
+
+LAN mode exposes the alpha HTTP server to your local network. Read [Security Model](./SECURITY_MODEL.md) and [Operator Authorization](./OPERATOR_AUTH.md) before using LAN mode beyond a trusted demo network.
 
 If you want phone/LAN control actions when starting manually, set an operator token and open the app with that token in the URL fragment:
 

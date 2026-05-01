@@ -5,6 +5,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
+from mesh_protocol.capability_grants import redact_capability_grant, validate_capability_grant
+
 
 class MeshArtifactService:
     """Content-addressed artifact lifecycle helpers for SovereignMesh."""
@@ -459,7 +461,7 @@ class MeshArtifactService:
         remote_artifact = remote_client.get_artifact(artifact_token, peer_id=self.mesh.node_id, include_content=include_content)
         return remote_client, remote_artifact, artifact_token
 
-    def _remote_auth_summary(self, remote_auth: Optional[dict]) -> dict:
+    def _remote_auth_summary(self, remote_auth: Optional[dict], *, now=None) -> dict:
         auth = dict(remote_auth or {})
         auth_type = str(auth.get("type") or "").strip().lower()
         if not auth_type:
@@ -468,7 +470,15 @@ class MeshArtifactService:
             if not str(auth.get("token") or "").strip():
                 raise self.mesh.MeshPolicyError("remote_auth.operator_token requires a token")
             return {"type": "operator_token", "status": "used", "redacted": True}
-        if auth_type in {"signed_delegation", "capability_grant"}:
+        if auth_type == "capability_grant":
+            grant = dict(auth.get("grant") or auth)
+            validation = validate_capability_grant(grant, now=now)
+            if validation.get("status") != "ok":
+                issue = next(iter(validation.get("issues") or []), {})
+                detail = issue.get("message") or validation.get("status") or "invalid"
+                raise self.mesh.MeshPolicyError(f"remote_auth.capability_grant {detail}")
+            return redact_capability_grant(grant, status="declared")
+        if auth_type == "signed_delegation":
             raise self.mesh.MeshPolicyError("signed artifact delegation is reserved for a future protocol layer")
         raise self.mesh.MeshPolicyError(f"unsupported remote_auth type: {auth_type}")
 

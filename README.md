@@ -158,6 +158,7 @@ Some devices are powerful. Some are private. Some are fragile. Some are approval
 ```bash
 git clone https://github.com/workingclassbuddha/open-compute-protocol.git
 cd open-compute-protocol
+python3 -m pip install -e .
 python3 scripts/start_ocp_easy.py
 ```
 
@@ -198,6 +199,16 @@ If you want the shell-based starter instead of the auto-open launcher:
 ```
 
 For a fuller walkthrough, see [docs/QUICKSTART.md](./docs/QUICKSTART.md).
+
+### Trustworthy Alpha Notes
+
+OCP v0.1.7 is a stabilization pass around packaging, security posture, protocol contract visibility, tests, and demo flow. It is still alpha and should not be treated as production-secure or protocol-stable.
+
+- [Security Model](./docs/SECURITY_MODEL.md)
+- [Operator Authorization](./docs/OPERATOR_AUTH.md)
+- [HTTP API Overview](./docs/OCP_HTTP_API.md)
+- [Two Macs and a Phone Demo](./docs/DEMO_TWO_MACS_AND_PHONE.md)
+- [v0.1 Draft Spec](./docs/spec/OCP_v0.1.md)
 
 ---
 
@@ -315,6 +326,7 @@ These are meant to give the project a clearer identity as:
 ## Tests
 
 ```bash
+python3 scripts/check_protocol_conformance.py
 python3 -m unittest tests.test_sovereign_mesh
 python3 server.py --help
 ```

@@ -1,0 +1,4909 @@
+{
+  "conformance": {
+    "fixture_count": 14,
+    "fixtures": [
+      {
+        "id": "signed-envelope-minimal",
+        "purpose": "Canonical minimal signed envelope shape used across POST /mesh routes.",
+        "schema_ref": "SignedEnvelope",
+        "validation": {
+          "issues": [],
+          "schema_ref": "SignedEnvelope",
+          "status": "ok"
+        },
+        "value": {
+          "body": {
+            "artifact": {
+              "descriptor": {
+                "artifact_id": "artifact-fixture",
+                "digest": "f00d"
+              }
+            }
+          },
+          "request": {
+            "implementation": "Sovereign Mesh",
+            "node_id": "fixture-node",
+            "nonce": "fixture-nonce",
+            "protocol_family": "Open Compute Protocol",
+            "protocol_release": "0.1",
+            "protocol_version": "sovereign-mesh/v1",
+            "request_id": "fixture-request",
+            "signature": "fixture-signature",
+            "signature_scheme": "ed25519-sha512-v1",
+            "timestamp": "2026-01-01T00:00:00Z"
+          }
+        }
+      },
+      {
+        "id": "mesh-manifest-minimal",
+        "purpose": "Minimal live-manifest shape advertised by a node.",
+        "schema_ref": "MeshManifest",
+        "validation": {
+          "issues": [],
+          "schema_ref": "MeshManifest",
+          "status": "ok"
+        },
+        "value": {
+          "continuity_capabilities": {
+            "custody_review": true,
+            "mission_continuity": true
+          },
+          "device_profile": {
+            "device_class": "full",
+            "form_factor": "workstation"
+          },
+          "governance_summary": {
+            "active_treaty_ids": [
+              "treaty/fixture-v1"
+            ]
+          },
+          "implementation": {
+            "name": "Sovereign Mesh"
+          },
+          "organism_card": {
+            "continuity_capabilities": {
+              "custody_review": true,
+              "mission_continuity": true
+            },
+            "device_profile": {
+              "device_class": "full",
+              "form_factor": "workstation"
+            },
+            "display_name": "Fixture Node",
+            "endpoint_url": "http://127.0.0.1:8421",
+            "node_id": "fixture-node",
+            "organism_id": "fixture-node",
+            "protocol_version": "sovereign-mesh/v1",
+            "public_key": "fixture-public-key",
+            "treaty_capabilities": {
+              "continuity_validation": true,
+              "treaty_documents": true
+            },
+            "trust_tier": "self"
+          },
+          "protocol": "Open Compute Protocol",
+          "protocol_release": "0.1",
+          "protocol_short_name": "OCP",
+          "protocol_version": "sovereign-mesh/v1",
+          "sync_policy": {
+            "sleep_capable": false
+          },
+          "treaty_capabilities": {
+            "continuity_validation": true,
+            "treaty_documents": true
+          }
+        }
+      },
+      {
+        "id": "job-submission-request",
+        "purpose": "Representative queued Python job submission body.",
+        "schema_ref": "JobSubmissionRequest",
+        "validation": {
+          "issues": [],
+          "schema_ref": "JobSubmissionRequest",
+          "status": "ok"
+        },
+        "value": {
+          "job": {
+            "dispatch_mode": "queued",
+            "kind": "python.inline",
+            "metadata": {
+              "origin": "conformance-fixture"
+            },
+            "payload": {
+              "code": "print('fixture job')"
+            },
+            "policy": {
+              "classification": "trusted",
+              "mode": "batch"
+            },
+            "requirements": {
+              "capabilities": [
+                "python"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "artifact-minimal",
+        "purpose": "Artifact descriptor/result shape returned by /mesh/artifacts endpoints.",
+        "schema_ref": "Artifact",
+        "validation": {
+          "issues": [],
+          "schema_ref": "Artifact",
+          "status": "ok"
+        },
+        "value": {
+          "artifact_kind": "bundle",
+          "created_at": "2026-01-01T00:00:00Z",
+          "descriptor": {
+            "artifact_id": "artifact-fixture",
+            "artifact_kind": "bundle",
+            "digest": "abc123",
+            "media_type": "application/json",
+            "size_bytes": 42
+          },
+          "digest": "abc123",
+          "id": "artifact-fixture",
+          "media_type": "application/json",
+          "metadata": {
+            "job_id": "job-fixture"
+          },
+          "size_bytes": 42
+        }
+      },
+      {
+        "id": "artifact-replicate-request-operator-mediated",
+        "purpose": "Explicit operator-mediated artifact pull request without persisting remote credentials.",
+        "schema_ref": "ArtifactReplicateRequest",
+        "validation": {
+          "issues": [],
+          "schema_ref": "ArtifactReplicateRequest",
+          "status": "ok"
+        },
+        "value": {
+          "artifact_id": "artifact-fixture",
+          "peer_id": "beta-node",
+          "pin": true,
+          "remote_auth": {
+            "token": "fixture-token",
+            "type": "operator_token"
+          }
+        }
+      },
+      {
+        "id": "capability-grant-artifact-read",
+        "purpose": "Alpha signed scoped grant shape for one private artifact read.",
+        "schema_ref": "CapabilityGrant",
+        "validation": {
+          "issues": [],
+          "schema_ref": "CapabilityGrant",
+          "status": "ok"
+        },
+        "value": {
+          "audience_peer_id": "beta-node",
+          "expires_at": "2026-01-01T00:05:00Z",
+          "grant_id": "grant-alpha-private-artifact",
+          "issued_at": "2026-01-01T00:00:00Z",
+          "issuer_peer_id": "beta-node",
+          "nonce": "grant-fixture-nonce",
+          "scope": {
+            "action": "artifact.read",
+            "artifact_id": "artifact-fixture",
+            "digest": "abc123",
+            "max_uses": 1
+          },
+          "signature": "fixture-signature",
+          "signature_scheme": "ed25519-sha512-v1",
+          "subject_peer_id": "alpha-node"
+        }
+      },
+      {
+        "id": "artifact-replicate-request-capability-grant",
+        "purpose": "Private artifact replication request carrying a declared scoped grant instead of a remote operator token.",
+        "schema_ref": "ArtifactReplicateRequest",
+        "validation": {
+          "issues": [],
+          "schema_ref": "ArtifactReplicateRequest",
+          "status": "ok"
+        },
+        "value": {
+          "artifact_id": "artifact-fixture",
+          "peer_id": "beta-node",
+          "pin": true,
+          "remote_auth": {
+            "grant": {
+              "audience_peer_id": "beta-node",
+              "expires_at": "2026-01-01T00:05:00Z",
+              "grant_id": "grant-alpha-private-artifact",
+              "issued_at": "2026-01-01T00:00:00Z",
+              "issuer_peer_id": "beta-node",
+              "nonce": "grant-fixture-nonce",
+              "scope": {
+                "action": "artifact.read",
+                "artifact_id": "artifact-fixture",
+                "digest": "abc123",
+                "max_uses": 1
+              },
+              "signature": "fixture-signature",
+              "signature_scheme": "ed25519-sha512-v1",
+              "subject_peer_id": "alpha-node"
+            },
+            "type": "capability_grant"
+          }
+        }
+      },
+      {
+        "id": "artifact-replicate-response-redacted-auth",
+        "purpose": "Artifact replication response with route proof and redacted remote auth metadata.",
+        "schema_ref": "ArtifactReplicateResponse",
+        "validation": {
+          "issues": [],
+          "schema_ref": "ArtifactReplicateResponse",
+          "status": "ok"
+        },
+        "value": {
+          "artifact": {
+            "artifact_kind": "bundle",
+            "digest": "abc123",
+            "id": "artifact-local",
+            "media_type": "application/json"
+          },
+          "remote_auth": {
+            "redacted": true,
+            "status": "used",
+            "type": "operator_token"
+          },
+          "route_proof": {
+            "best_route": "http://192.168.1.22:8421",
+            "status": "fresh"
+          },
+          "source": {
+            "artifact_id": "artifact-fixture",
+            "digest": "abc123",
+            "peer_id": "beta-node"
+          },
+          "status": "replicated",
+          "verification": {
+            "status": "verified",
+            "verified": true
+          }
+        }
+      },
+      {
+        "id": "continuity-restore-request",
+        "purpose": "Dry-run restore planning request for a continuity vessel.",
+        "schema_ref": "ContinuityRestorePlanRequest",
+        "validation": {
+          "issues": [],
+          "schema_ref": "ContinuityRestorePlanRequest",
+          "status": "ok"
+        },
+        "value": {
+          "artifact_id": "vessel-fixture",
+          "constraints": {
+            "prefer_device_classes": [
+              "relay",
+              "full"
+            ]
+          },
+          "target_peer_id": "trusted-peer"
+        }
+      },
+      {
+        "id": "treaty-audit-request",
+        "purpose": "Treaty validation request for continuity-bound operations.",
+        "schema_ref": "TreatyAuditRequest",
+        "validation": {
+          "issues": [],
+          "schema_ref": "TreatyAuditRequest",
+          "status": "ok"
+        },
+        "value": {
+          "metadata": {
+            "source": "contract-fixture"
+          },
+          "operation": "continuity_restore",
+          "treaty_requirements": [
+            "treaty/fixture-v1"
+          ]
+        }
+      },
+      {
+        "id": "route-health-reachable",
+        "purpose": "A proven HTTP route for a nearby trusted peer.",
+        "schema_ref": "RouteHealth",
+        "validation": {
+          "issues": [],
+          "schema_ref": "RouteHealth",
+          "status": "ok"
+        },
+        "value": {
+          "age_seconds": 0,
+          "best_route": "http://192.168.1.22:8421",
+          "candidates": [
+            {
+              "base_url": "http://192.168.1.22:8421",
+              "checked_at": "2026-01-01T00:00:00Z",
+              "failure_count": 0,
+              "freshness": "fresh",
+              "last_error": "",
+              "last_success_at": "2026-01-01T00:00:00Z",
+              "latency_ms": 12,
+              "next_probe_after": "",
+              "operator_hint": "",
+              "source": "last_reachable",
+              "status": "reachable"
+            }
+          ],
+          "checked_at": "2026-01-01T00:00:00Z",
+          "display_name": "Beta",
+          "failure_count": 0,
+          "freshness": "fresh",
+          "last_error": "",
+          "last_reachable_base_url": "http://192.168.1.22:8421",
+          "last_success_at": "2026-01-01T00:00:00Z",
+          "next_probe_after": "",
+          "operator_hint": "",
+          "operator_summary": "Beta is reachable at http://192.168.1.22:8421.",
+          "peer_id": "beta-node",
+          "status": "reachable"
+        }
+      },
+      {
+        "id": "autonomic-activate-request",
+        "purpose": "Assisted one-button mesh activation request from the phone control surface.",
+        "schema_ref": "AutonomicActivateRequest",
+        "validation": {
+          "issues": [],
+          "schema_ref": "AutonomicActivateRequest",
+          "status": "ok"
+        },
+        "value": {
+          "actor_agent_id": "ocp-mobile-ui",
+          "limit": 24,
+          "max_enlist": 2,
+          "mode": "assisted",
+          "repair": true,
+          "request_id": "autonomic-fixture",
+          "run_proof": true,
+          "scan_timeout": 0.8,
+          "timeout": 3.0
+        }
+      },
+      {
+        "id": "app-status-operator-home",
+        "purpose": "Compact operator-facing status used by the installable OCP app home.",
+        "schema_ref": "AppStatus",
+        "validation": {
+          "issues": [],
+          "schema_ref": "AppStatus",
+          "status": "ok"
+        },
+        "value": {
+          "app_urls": {
+            "app_url": "http://192.168.1.10:8421/app",
+            "base_url": "http://192.168.1.10:8421",
+            "control_url": "http://192.168.1.10:8421/control",
+            "lan_urls": [
+              "http://192.168.1.10:8421/app"
+            ],
+            "phone_url": "http://192.168.1.10:8421/app",
+            "setup_url": "http://192.168.1.10:8421/easy",
+            "share_advice": "",
+            "sharing_mode": "lan"
+          },
+          "approvals": {
+            "items": [],
+            "operator_summary": "No approvals are waiting.",
+            "pending_count": 0
+          },
+          "artifact_sync": {
+            "items": [],
+            "operator_summary": "1 replicated artifact(s) verified.",
+            "replicated_count": 1,
+            "status": "verified",
+            "verified_count": 1
+          },
+          "autonomy": {
+            "mode": "assisted",
+            "operator_summary": "Mesh is strong.",
+            "status": "ok"
+          },
+          "execution_readiness": {
+            "local": {
+              "ready_worker_count": 1,
+              "worker_count": 1
+            },
+            "operator_summary": "Execution is ready.",
+            "status": "ready",
+            "targets": [
+              {
+                "peer_id": "alpha-node",
+                "reasons": [
+                  "local worker registered"
+                ],
+                "status": "ready"
+              }
+            ],
+            "worker_capacity": [
+              {
+                "available_slots": 1,
+                "capabilities": [
+                  "worker-runtime",
+                  "shell"
+                ],
+                "max_concurrent_jobs": 1,
+                "peer_id": "alpha-node",
+                "resources": {
+                  "cpu": 1
+                },
+                "status": "active",
+                "worker_id": "alpha-default-worker"
+              }
+            ]
+          },
+          "generated_at": "2026-01-01T00:00:00Z",
+          "latest_proof": {
+            "mission_id": "mission-fixture",
+            "status": "completed",
+            "summary": "Whole Mesh Test Mission is completed.",
+            "title": "Whole Mesh Test Mission"
+          },
+          "mesh_quality": {
+            "healthy_routes": 1,
+            "label": "Mesh strong",
+            "operator_summary": "Mesh is strong.",
+            "peer_count": 1,
+            "route_count": 1,
+            "status": "strong"
+          },
+          "next_actions": [
+            "Mesh is ready."
+          ],
+          "node": {
+            "device_class": "full",
+            "display_name": "Alpha",
+            "form_factor": "laptop",
+            "node_id": "alpha-node",
+            "protocol_release": "0.1",
+            "protocol_version": "sovereign-mesh/v1"
+          },
+          "protocol": {
+            "contract_url": "/mesh/contract",
+            "release": "0.1",
+            "schema_version": "ocp-protocol-schemas/v1alpha1",
+            "version": "sovereign-mesh/v1"
+          },
+          "route_health": {
+            "count": 1,
+            "healthy": 1,
+            "routes": [
+              {
+                "candidates": [],
+                "peer_id": "beta-node",
+                "status": "reachable"
+              }
+            ],
+            "status": "ok"
+          },
+          "setup": {
+            "bind_mode": "lan",
+            "blocker_code": "",
+            "blocking_issue": "",
+            "device_roles": [
+              {
+                "display_name": "Alpha",
+                "peer_id": "alpha-node",
+                "role": "local_command",
+                "status": "ready",
+                "summary": "This Mac is the local command node."
+              },
+              {
+                "display_name": "Beta",
+                "peer_id": "beta-node",
+                "role": "compute",
+                "status": "ready",
+                "summary": "Beta is ready for compute work."
+              }
+            ],
+            "healthy_route_count": 1,
+            "known_peer_count": 1,
+            "label": "Mesh strong",
+            "latest_proof_status": "completed",
+            "next_fix": "No fix needed. The current mesh proof completed.",
+            "operator_summary": "Mesh is strong. Devices have proven routes and the latest proof completed.",
+            "phone_url": "http://192.168.1.10:8421/app",
+            "primary_action": "activate_mesh",
+            "primary_peer": {
+              "display_name": "Beta",
+              "peer_id": "beta-node",
+              "role": "compute",
+              "route": "http://192.168.1.22:8421",
+              "status": "ready",
+              "summary": "Beta is best for compute right now."
+            },
+            "recovery_state": "healthy",
+            "route_count": 1,
+            "status": "strong",
+            "story": [
+              "Mesh is strong.",
+              "Beta is best for compute right now.",
+              "Whole-mesh proof completed."
+            ],
+            "timeline": [
+              {
+                "created_at": "2026-01-01T00:00:00Z",
+                "kind": "proof_completed",
+                "status": "ok",
+                "summary": "Whole-mesh proof completed."
+              }
+            ],
+            "token_status": "configured"
+          },
+          "status": "ok"
+        }
+      },
+      {
+        "id": "contract-snapshot-minimal",
+        "purpose": "Minimal /mesh/contract response shape.",
+        "schema_ref": "ContractSnapshot",
+        "validation": {
+          "issues": [],
+          "schema_ref": "ContractSnapshot",
+          "status": "ok"
+        },
+        "value": {
+          "conformance": {
+            "fixture_count": 0,
+            "fixtures": [],
+            "invalid_fixture_count": 0,
+            "status": "ok"
+          },
+          "contract_version": "ocp-http-contract/v1alpha1",
+          "endpoint_count": 1,
+          "endpoints": [
+            {
+              "group": "runtime",
+              "handler": "_handle_mesh_manifest",
+              "id": "get:/mesh/manifest",
+              "method": "GET",
+              "path": "/mesh/manifest",
+              "request": {
+                "argument_kind": "none"
+              },
+              "response": {
+                "schema_available": true,
+                "schema_ref": "MeshManifest",
+                "type": "object"
+              }
+            }
+          ],
+          "groups": {
+            "runtime": {
+              "count": 1,
+              "methods": [
+                "GET"
+              ]
+            }
+          },
+          "protocol_surface": "/mesh/*",
+          "schema_count": 1,
+          "schema_version": "ocp-protocol-schemas/v1alpha1",
+          "schemas": {
+            "MeshManifest": {
+              "type": "object"
+            }
+          },
+          "status": "ok"
+        }
+      }
+    ],
+    "invalid_fixture_count": 0,
+    "schema_version": "ocp-protocol-schemas/v1alpha1",
+    "status": "ok"
+  },
+  "contract_version": "ocp-http-contract/v1alpha1",
+  "endpoint_count": 94,
+  "endpoints": [
+    {
+      "group": "control",
+      "handler": "_handle_control_stream",
+      "id": "get:/mesh/control/stream",
+      "method": "GET",
+      "path": "/mesh/control/stream",
+      "request": {
+        "argument_kind": "params",
+        "query": {
+          "limit": "integer",
+          "once": "boolean",
+          "since": "integer"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "ControlStreamSSE",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_contract",
+      "id": "get:/mesh/contract",
+      "method": "GET",
+      "path": "/mesh/contract",
+      "request": {
+        "argument_kind": "none"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "ContractSnapshot",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_app_status",
+      "id": "get:/mesh/app/status",
+      "method": "GET",
+      "path": "/mesh/app/status",
+      "request": {
+        "argument_kind": "none"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "AppStatus",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_app_history",
+      "id": "get:/mesh/app/history",
+      "method": "GET",
+      "path": "/mesh/app/history",
+      "request": {
+        "argument_kind": "params",
+        "query": {
+          "limit": "integer"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "AppStatusHistory",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_manifest",
+      "id": "get:/mesh/manifest",
+      "method": "GET",
+      "path": "/mesh/manifest",
+      "request": {
+        "argument_kind": "none"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "MeshManifest",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_device_profile",
+      "id": "get:/mesh/device-profile",
+      "method": "GET",
+      "path": "/mesh/device-profile",
+      "request": {
+        "argument_kind": "none"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "DeviceProfileResponse",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_connectivity_diagnostics",
+      "id": "get:/mesh/connectivity/diagnostics",
+      "method": "GET",
+      "path": "/mesh/connectivity/diagnostics",
+      "request": {
+        "argument_kind": "none"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_autonomy_status",
+      "id": "get:/mesh/autonomy/status",
+      "method": "GET",
+      "path": "/mesh/autonomy/status",
+      "request": {
+        "argument_kind": "none"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "AutonomicMeshStatus",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_routes_health",
+      "id": "get:/mesh/routes/health",
+      "method": "GET",
+      "path": "/mesh/routes/health",
+      "request": {
+        "argument_kind": "none"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "RouteHealthList",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_discovery_candidates",
+      "id": "get:/mesh/discovery/candidates",
+      "method": "GET",
+      "path": "/mesh/discovery/candidates",
+      "request": {
+        "argument_kind": "params",
+        "query": {
+          "limit": "integer",
+          "status": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "DiscoveryCandidateList",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_peers",
+      "id": "get:/mesh/peers",
+      "method": "GET",
+      "path": "/mesh/peers",
+      "request": {
+        "argument_kind": "params",
+        "query": {
+          "limit": "integer"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "PeerList",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_stream",
+      "id": "get:/mesh/stream",
+      "method": "GET",
+      "path": "/mesh/stream",
+      "request": {
+        "argument_kind": "params",
+        "query": {
+          "limit": "integer",
+          "since": "integer"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "EventStreamSnapshot",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_job_get",
+      "id": "get:/mesh/jobs/{job_id}",
+      "method": "GET",
+      "path": "/mesh/jobs/{job_id}",
+      "request": {
+        "argument_kind": "path",
+        "path": {
+          "job_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Job",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_missions",
+      "id": "get:/mesh/missions",
+      "method": "GET",
+      "path": "/mesh/missions",
+      "request": {
+        "argument_kind": "params",
+        "query": {
+          "limit": "integer",
+          "status": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "MissionList",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_mission_continuity_get",
+      "id": "get:/mesh/missions/{mission_id}/continuity",
+      "method": "GET",
+      "path": "/mesh/missions/{mission_id}/continuity",
+      "request": {
+        "argument_kind": "path",
+        "path": {
+          "mission_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "MissionContinuitySummary",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_mission_get",
+      "id": "get:/mesh/missions/{mission_id}",
+      "method": "GET",
+      "path": "/mesh/missions/{mission_id}",
+      "request": {
+        "argument_kind": "path",
+        "path": {
+          "mission_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Mission",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_cooperative_tasks",
+      "id": "get:/mesh/cooperative-tasks",
+      "method": "GET",
+      "path": "/mesh/cooperative-tasks",
+      "request": {
+        "argument_kind": "params",
+        "query": {
+          "limit": "integer",
+          "state": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "CooperativeTaskList",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_cooperative_task_get",
+      "id": "get:/mesh/cooperative-tasks/{task_id}",
+      "method": "GET",
+      "path": "/mesh/cooperative-tasks/{task_id}",
+      "request": {
+        "argument_kind": "path",
+        "path": {
+          "task_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "CooperativeTask",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_pressure",
+      "id": "get:/mesh/pressure",
+      "method": "GET",
+      "path": "/mesh/pressure",
+      "request": {
+        "argument_kind": "none"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "MeshPressure",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_helpers",
+      "id": "get:/mesh/helpers",
+      "method": "GET",
+      "path": "/mesh/helpers",
+      "request": {
+        "argument_kind": "params",
+        "query": {
+          "limit": "integer"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "HelperList",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_helpers_preferences",
+      "id": "get:/mesh/helpers/preferences",
+      "method": "GET",
+      "path": "/mesh/helpers/preferences",
+      "request": {
+        "argument_kind": "params",
+        "query": {
+          "limit": "integer",
+          "peer_id": "string",
+          "workload_class": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_helpers_autonomy",
+      "id": "get:/mesh/helpers/autonomy",
+      "method": "GET",
+      "path": "/mesh/helpers/autonomy",
+      "request": {
+        "argument_kind": "none"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "AutonomousOffloadEvaluation",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_workers",
+      "id": "get:/mesh/workers",
+      "method": "GET",
+      "path": "/mesh/workers",
+      "request": {
+        "argument_kind": "params",
+        "query": {
+          "limit": "integer"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "WorkerList",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_notifications",
+      "id": "get:/mesh/notifications",
+      "method": "GET",
+      "path": "/mesh/notifications",
+      "request": {
+        "argument_kind": "params",
+        "query": {
+          "limit": "integer",
+          "status": "string",
+          "target_agent_id": "string",
+          "target_peer_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "NotificationList",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_approvals",
+      "id": "get:/mesh/approvals",
+      "method": "GET",
+      "path": "/mesh/approvals",
+      "request": {
+        "argument_kind": "params",
+        "query": {
+          "limit": "integer",
+          "status": "string",
+          "target_agent_id": "string",
+          "target_peer_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "ApprovalList",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_treaties",
+      "id": "get:/mesh/treaties",
+      "method": "GET",
+      "path": "/mesh/treaties",
+      "request": {
+        "argument_kind": "params",
+        "query": {
+          "limit": "integer",
+          "status": "string",
+          "treaty_type": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "TreatyList",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_treaty_get",
+      "id": "get:/mesh/treaties/{treaty_id}",
+      "method": "GET",
+      "path": "/mesh/treaties/{treaty_id}",
+      "request": {
+        "argument_kind": "path",
+        "path": {
+          "treaty_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Treaty",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_secrets",
+      "id": "get:/mesh/secrets",
+      "method": "GET",
+      "path": "/mesh/secrets",
+      "request": {
+        "argument_kind": "params",
+        "query": {
+          "limit": "integer",
+          "scope": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "SecretList",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_queue",
+      "id": "get:/mesh/queue",
+      "method": "GET",
+      "path": "/mesh/queue",
+      "request": {
+        "argument_kind": "params",
+        "query": {
+          "limit": "integer",
+          "status": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "QueueMessageList",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_queue_events",
+      "id": "get:/mesh/queue/events",
+      "method": "GET",
+      "path": "/mesh/queue/events",
+      "request": {
+        "argument_kind": "params",
+        "query": {
+          "job_id": "string",
+          "limit": "integer",
+          "queue_message_id": "string",
+          "since": "integer",
+          "since_seq": "integer"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "QueueEventList",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_queue_metrics",
+      "id": "get:/mesh/queue/metrics",
+      "method": "GET",
+      "path": "/mesh/queue/metrics",
+      "request": {
+        "argument_kind": "none"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "QueueMetrics",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_scheduler_decisions",
+      "id": "get:/mesh/scheduler/decisions",
+      "method": "GET",
+      "path": "/mesh/scheduler/decisions",
+      "request": {
+        "argument_kind": "params",
+        "query": {
+          "limit": "integer",
+          "status": "string",
+          "target_type": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "SchedulerDecisionList",
+        "type": "object"
+      }
+    },
+    {
+      "group": "artifacts",
+      "handler": "_handle_mesh_artifact_list",
+      "id": "get:/mesh/artifacts",
+      "method": "GET",
+      "path": "/mesh/artifacts",
+      "request": {
+        "argument_kind": "params",
+        "query": {
+          "artifact_kind": "string",
+          "attempt_id": "string",
+          "digest": "string",
+          "job_id": "string",
+          "limit": "integer",
+          "media_type": "string",
+          "owner_peer_id": "string",
+          "parent_artifact_id": "string",
+          "retention_class": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "ArtifactList",
+        "type": "object"
+      }
+    },
+    {
+      "group": "artifacts",
+      "handler": "_handle_mesh_artifact_get",
+      "id": "get:/mesh/artifacts/{artifact_id}",
+      "method": "GET",
+      "path": "/mesh/artifacts/{artifact_id}",
+      "request": {
+        "argument_kind": "path_params",
+        "path": {
+          "artifact_id": "string"
+        },
+        "query": {
+          "include_content": "boolean"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Artifact",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_handshake",
+      "id": "post:/mesh/handshake",
+      "method": "POST",
+      "path": "/mesh/handshake",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "manifest": "object",
+          "peer_card": "signed_envelope"
+        },
+        "schema_ref": "SignedEnvelope"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "HandshakeResponse",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_device_profile_update",
+      "id": "post:/mesh/device-profile",
+      "method": "POST",
+      "path": "/mesh/device-profile",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "device_profile": "object"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "DeviceProfileResponse",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_app_history_sample",
+      "id": "post:/mesh/app/history/sample",
+      "method": "POST",
+      "path": "/mesh/app/history/sample",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "source": "string"
+        },
+        "schema_ref": "AppHistorySampleRequest"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "AppHistorySampleResponse",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_autonomy_activate",
+      "id": "post:/mesh/autonomy/activate",
+      "method": "POST",
+      "path": "/mesh/autonomy/activate",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "limit": "integer",
+          "mode": "string",
+          "repair": "boolean",
+          "run_proof": "boolean"
+        },
+        "schema_ref": "AutonomicActivateRequest"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "AutonomicRun",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_routes_probe",
+      "id": "post:/mesh/routes/probe",
+      "method": "POST",
+      "path": "/mesh/routes/probe",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "base_url": "string",
+          "limit": "integer",
+          "peer_id": "string",
+          "timeout": "number"
+        },
+        "schema_ref": "RouteProbeRequest"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "RouteProbeResult",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_discovery_seek",
+      "id": "post:/mesh/discovery/seek",
+      "method": "POST",
+      "path": "/mesh/discovery/seek",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "auto_connect": "boolean",
+          "base_urls": "array",
+          "cidr": "string",
+          "hosts": "array",
+          "limit": "integer",
+          "port": "integer",
+          "trust_tier": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_discovery_scan_local",
+      "id": "post:/mesh/discovery/scan-local",
+      "method": "POST",
+      "path": "/mesh/discovery/scan-local",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "limit": "integer",
+          "port": "integer",
+          "timeout": "number",
+          "trust_tier": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_peers_connect",
+      "id": "post:/mesh/peers/connect",
+      "method": "POST",
+      "path": "/mesh/peers/connect",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "base_url": "string",
+          "peer_id": "string",
+          "trust_tier": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_peers_connect_all",
+      "id": "post:/mesh/peers/connect-all",
+      "method": "POST",
+      "path": "/mesh/peers/connect-all",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "limit": "integer",
+          "refresh_manifest": "boolean",
+          "trust_tier": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_peers_sync",
+      "id": "post:/mesh/peers/sync",
+      "method": "POST",
+      "path": "/mesh/peers/sync",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "limit": "integer",
+          "peer_id": "string",
+          "refresh_manifest": "boolean"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_lease_acquire",
+      "id": "post:/mesh/lease/acquire",
+      "method": "POST",
+      "path": "/mesh/lease/acquire",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "peer_id": "string",
+          "resource": "string",
+          "ttl_seconds": "integer"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_lease_heartbeat",
+      "id": "post:/mesh/lease/heartbeat",
+      "method": "POST",
+      "path": "/mesh/lease/heartbeat",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "lease_id": "string",
+          "ttl_seconds": "integer"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_lease_release",
+      "id": "post:/mesh/lease/release",
+      "method": "POST",
+      "path": "/mesh/lease/release",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "lease_id": "string",
+          "status": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_worker_heartbeat",
+      "id": "post:/mesh/workers/{worker_id}/heartbeat",
+      "method": "POST",
+      "path": "/mesh/workers/{worker_id}/heartbeat",
+      "request": {
+        "argument_kind": "path_data",
+        "body": {
+          "metadata": "object",
+          "resources": "object",
+          "status": "string"
+        },
+        "path": {
+          "worker_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_worker_poll",
+      "id": "post:/mesh/workers/{worker_id}/poll",
+      "method": "POST",
+      "path": "/mesh/workers/{worker_id}/poll",
+      "request": {
+        "argument_kind": "path_data",
+        "body": {
+          "limit": "integer"
+        },
+        "path": {
+          "worker_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_worker_claim",
+      "id": "post:/mesh/workers/{worker_id}/claim",
+      "method": "POST",
+      "path": "/mesh/workers/{worker_id}/claim",
+      "request": {
+        "argument_kind": "path_data",
+        "body": {
+          "job_id": "string",
+          "ttl_seconds": "integer"
+        },
+        "path": {
+          "worker_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_attempt_heartbeat",
+      "id": "post:/mesh/jobs/attempts/{attempt_id}/heartbeat",
+      "method": "POST",
+      "path": "/mesh/jobs/attempts/{attempt_id}/heartbeat",
+      "request": {
+        "argument_kind": "path_data",
+        "body": {
+          "metadata": "object",
+          "ttl_seconds": "integer"
+        },
+        "path": {
+          "attempt_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_attempt_complete",
+      "id": "post:/mesh/jobs/attempts/{attempt_id}/complete",
+      "method": "POST",
+      "path": "/mesh/jobs/attempts/{attempt_id}/complete",
+      "request": {
+        "argument_kind": "path_data",
+        "body": {
+          "executor": "string",
+          "metadata": "object",
+          "result": "object"
+        },
+        "path": {
+          "attempt_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_attempt_fail",
+      "id": "post:/mesh/jobs/attempts/{attempt_id}/fail",
+      "method": "POST",
+      "path": "/mesh/jobs/attempts/{attempt_id}/fail",
+      "request": {
+        "argument_kind": "path_data",
+        "body": {
+          "error": "string",
+          "metadata": "object",
+          "retryable": "boolean"
+        },
+        "path": {
+          "attempt_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "runtime",
+      "handler": "_handle_mesh_handoff",
+      "id": "post:/mesh/agents/handoff",
+      "method": "POST",
+      "path": "/mesh/agents/handoff",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "handoff": "signed_envelope"
+        },
+        "schema_ref": "SignedEnvelope"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_job_submit",
+      "id": "post:/mesh/jobs/submit",
+      "method": "POST",
+      "path": "/mesh/jobs/submit",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "job": "signed_envelope|object"
+        },
+        "schema_ref": "SignedEnvelope"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_job_schedule",
+      "id": "post:/mesh/jobs/schedule",
+      "method": "POST",
+      "path": "/mesh/jobs/schedule",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "job": "object",
+          "request_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_mission_launch",
+      "id": "post:/mesh/missions/launch",
+      "method": "POST",
+      "path": "/mesh/missions/launch",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "continuity": "object",
+          "intent": "string",
+          "job": "object",
+          "title": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_mission_test_launch",
+      "id": "post:/mesh/missions/test-launch",
+      "method": "POST",
+      "path": "/mesh/missions/test-launch",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "intent": "string",
+          "peer_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_mission_test_mesh_launch",
+      "id": "post:/mesh/missions/test-mesh-launch",
+      "method": "POST",
+      "path": "/mesh/missions/test-mesh-launch",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "include_local": "boolean",
+          "limit": "integer"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_continuity_vessel_verify",
+      "id": "post:/mesh/continuity/vessels/verify",
+      "method": "POST",
+      "path": "/mesh/continuity/vessels/verify",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "artifact_id": "string",
+          "include_content": "boolean"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "ContinuityVesselVerification",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_continuity_restore_plan",
+      "id": "post:/mesh/continuity/vessels/restore-plan",
+      "method": "POST",
+      "path": "/mesh/continuity/vessels/restore-plan",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "artifact_id": "string",
+          "constraints": "object",
+          "target_peer_id": "string"
+        },
+        "schema_ref": "ContinuityRestorePlanRequest"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "ContinuityRestorePlan",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_mission_continuity_export",
+      "id": "post:/mesh/missions/{mission_id}/continuity/export",
+      "method": "POST",
+      "path": "/mesh/missions/{mission_id}/continuity/export",
+      "request": {
+        "argument_kind": "path_data",
+        "body": {
+          "dry_run": "boolean",
+          "include_artifacts": "boolean",
+          "metadata": "object"
+        },
+        "path": {
+          "mission_id": "string"
+        },
+        "schema_ref": "ContinuityVesselExportRequest"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "ContinuityVesselExport",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_mission_cancel",
+      "id": "post:/mesh/missions/{mission_id}/cancel",
+      "method": "POST",
+      "path": "/mesh/missions/{mission_id}/cancel",
+      "request": {
+        "argument_kind": "path_data",
+        "body": {
+          "operator_id": "string",
+          "reason": "string"
+        },
+        "path": {
+          "mission_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_mission_resume_from_checkpoint",
+      "id": "post:/mesh/missions/{mission_id}/resume-from-checkpoint",
+      "method": "POST",
+      "path": "/mesh/missions/{mission_id}/resume-from-checkpoint",
+      "request": {
+        "argument_kind": "path_data",
+        "body": {
+          "checkpoint_ref": "object",
+          "metadata": "object",
+          "operator_id": "string"
+        },
+        "path": {
+          "mission_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_mission_resume",
+      "id": "post:/mesh/missions/{mission_id}/resume",
+      "method": "POST",
+      "path": "/mesh/missions/{mission_id}/resume",
+      "request": {
+        "argument_kind": "path_data",
+        "body": {
+          "metadata": "object",
+          "operator_id": "string"
+        },
+        "path": {
+          "mission_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_mission_restart",
+      "id": "post:/mesh/missions/{mission_id}/restart",
+      "method": "POST",
+      "path": "/mesh/missions/{mission_id}/restart",
+      "request": {
+        "argument_kind": "path_data",
+        "body": {
+          "metadata": "object",
+          "operator_id": "string",
+          "reason": "string"
+        },
+        "path": {
+          "mission_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_job_resume_from_checkpoint",
+      "id": "post:/mesh/jobs/{job_id}/resume-from-checkpoint",
+      "method": "POST",
+      "path": "/mesh/jobs/{job_id}/resume-from-checkpoint",
+      "request": {
+        "argument_kind": "path_data",
+        "body": {
+          "checkpoint_ref": "object",
+          "metadata": "object",
+          "operator_id": "string"
+        },
+        "path": {
+          "job_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_job_resume",
+      "id": "post:/mesh/jobs/{job_id}/resume",
+      "method": "POST",
+      "path": "/mesh/jobs/{job_id}/resume",
+      "request": {
+        "argument_kind": "path_data",
+        "body": {
+          "metadata": "object",
+          "operator_id": "string"
+        },
+        "path": {
+          "job_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_job_restart",
+      "id": "post:/mesh/jobs/{job_id}/restart",
+      "method": "POST",
+      "path": "/mesh/jobs/{job_id}/restart",
+      "request": {
+        "argument_kind": "path_data",
+        "body": {
+          "metadata": "object",
+          "operator_id": "string",
+          "reason": "string"
+        },
+        "path": {
+          "job_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_job_cancel",
+      "id": "post:/mesh/jobs/{job_id}/cancel",
+      "method": "POST",
+      "path": "/mesh/jobs/{job_id}/cancel",
+      "request": {
+        "argument_kind": "path_data",
+        "body": {
+          "operator_id": "string",
+          "reason": "string"
+        },
+        "path": {
+          "job_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "missions",
+      "handler": "_handle_mesh_cooperative_task_launch",
+      "id": "post:/mesh/cooperative-tasks/launch",
+      "method": "POST",
+      "path": "/mesh/cooperative-tasks/launch",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "base_job": "object",
+          "name": "string",
+          "shards": "array"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_helpers_plan",
+      "id": "post:/mesh/helpers/plan",
+      "method": "POST",
+      "path": "/mesh/helpers/plan",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "limit": "integer",
+          "workload_class": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_helpers_enlist",
+      "id": "post:/mesh/helpers/enlist",
+      "method": "POST",
+      "path": "/mesh/helpers/enlist",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "peer_id": "string",
+          "reason": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_helpers_drain",
+      "id": "post:/mesh/helpers/drain",
+      "method": "POST",
+      "path": "/mesh/helpers/drain",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "peer_id": "string",
+          "reason": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_helpers_retire",
+      "id": "post:/mesh/helpers/retire",
+      "method": "POST",
+      "path": "/mesh/helpers/retire",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "peer_id": "string",
+          "reason": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_helpers_auto_seek",
+      "id": "post:/mesh/helpers/auto-seek",
+      "method": "POST",
+      "path": "/mesh/helpers/auto-seek",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "limit": "integer",
+          "trust_tier": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_helpers_preferences_set",
+      "id": "post:/mesh/helpers/preferences/set",
+      "method": "POST",
+      "path": "/mesh/helpers/preferences/set",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "peer_id": "string",
+          "preference": "string",
+          "workload_class": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_helpers_autonomy_run",
+      "id": "post:/mesh/helpers/autonomy/run",
+      "method": "POST",
+      "path": "/mesh/helpers/autonomy/run",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "dry_run": "boolean",
+          "reason": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_worker_register",
+      "id": "post:/mesh/workers/register",
+      "method": "POST",
+      "path": "/mesh/workers/register",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "agent_id": "string",
+          "capabilities": "array",
+          "worker_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_notification_publish",
+      "id": "post:/mesh/notifications/publish",
+      "method": "POST",
+      "path": "/mesh/notifications/publish",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "body": "string",
+          "notification_type": "string",
+          "title": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_notification_ack",
+      "id": "post:/mesh/notifications/{notification_id}/ack",
+      "method": "POST",
+      "path": "/mesh/notifications/{notification_id}/ack",
+      "request": {
+        "argument_kind": "path_data",
+        "body": {
+          "actor_peer_id": "string",
+          "status": "string"
+        },
+        "path": {
+          "notification_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_approval_request",
+      "id": "post:/mesh/approvals/request",
+      "method": "POST",
+      "path": "/mesh/approvals/request",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "metadata": "object",
+          "summary": "string",
+          "title": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_approval_resolve",
+      "id": "post:/mesh/approvals/{approval_id}/resolve",
+      "method": "POST",
+      "path": "/mesh/approvals/{approval_id}/resolve",
+      "request": {
+        "argument_kind": "path_data",
+        "body": {
+          "decision": "string",
+          "metadata": "object",
+          "operator_peer_id": "string"
+        },
+        "path": {
+          "approval_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_treaty_propose",
+      "id": "post:/mesh/treaties/propose",
+      "method": "POST",
+      "path": "/mesh/treaties/propose",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "summary": "string",
+          "title": "string",
+          "treaty_id": "string",
+          "treaty_type": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_treaty_audit",
+      "id": "post:/mesh/treaties/audit",
+      "method": "POST",
+      "path": "/mesh/treaties/audit",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "metadata": "object",
+          "operation": "string",
+          "treaty_requirements": "array"
+        },
+        "schema_ref": "TreatyAuditRequest"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_secret_put",
+      "id": "post:/mesh/secrets/put",
+      "method": "POST",
+      "path": "/mesh/secrets/put",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "metadata": "object",
+          "name": "string",
+          "scope": "string",
+          "value": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_queue_replay",
+      "id": "post:/mesh/queue/replay",
+      "method": "POST",
+      "path": "/mesh/queue/replay",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "queue_message_id": "string",
+          "reason": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "ops",
+      "handler": "_handle_mesh_queue_ack_deadline",
+      "id": "post:/mesh/queue/ack-deadline",
+      "method": "POST",
+      "path": "/mesh/queue/ack-deadline",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "ack_deadline_seconds": "integer",
+          "queue_message_id": "string",
+          "ttl_seconds": "integer"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "Object",
+        "type": "object"
+      }
+    },
+    {
+      "group": "artifacts",
+      "handler": "_handle_mesh_artifact_publish",
+      "id": "post:/mesh/artifacts/publish",
+      "method": "POST",
+      "path": "/mesh/artifacts/publish",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "artifact": "object",
+          "content": "any",
+          "metadata": "object"
+        },
+        "schema_ref": "SignedEnvelope"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "ArtifactPublishResponse",
+        "type": "object"
+      }
+    },
+    {
+      "group": "artifacts",
+      "handler": "_handle_mesh_artifact_replicate",
+      "id": "post:/mesh/artifacts/replicate",
+      "method": "POST",
+      "path": "/mesh/artifacts/replicate",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "artifact_id": "string",
+          "base_url": "string",
+          "digest": "string",
+          "peer_id": "string",
+          "pin": "boolean",
+          "remote_auth": "object"
+        },
+        "schema_ref": "ArtifactReplicateRequest"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "ArtifactReplicateResponse",
+        "type": "object"
+      }
+    },
+    {
+      "group": "artifacts",
+      "handler": "_handle_mesh_artifact_replicate_graph",
+      "id": "post:/mesh/artifacts/replicate-graph",
+      "method": "POST",
+      "path": "/mesh/artifacts/replicate-graph",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "artifact_id": "string",
+          "base_url": "string",
+          "digest": "string",
+          "peer_id": "string",
+          "pin": "boolean",
+          "remote_auth": "object"
+        },
+        "schema_ref": "ArtifactReplicateRequest"
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "ArtifactGraphReplicateResponse",
+        "type": "object"
+      }
+    },
+    {
+      "group": "artifacts",
+      "handler": "_handle_mesh_artifact_pin",
+      "id": "post:/mesh/artifacts/pin",
+      "method": "POST",
+      "path": "/mesh/artifacts/pin",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "artifact_id": "string",
+          "pinned": "boolean",
+          "reason": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "ArtifactPinResponse",
+        "type": "object"
+      }
+    },
+    {
+      "group": "artifacts",
+      "handler": "_handle_mesh_artifact_verify_mirror",
+      "id": "post:/mesh/artifacts/verify-mirror",
+      "method": "POST",
+      "path": "/mesh/artifacts/verify-mirror",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "artifact_id": "string",
+          "digest": "string",
+          "peer_id": "string",
+          "source_artifact_id": "string"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "ArtifactMirrorVerification",
+        "type": "object"
+      }
+    },
+    {
+      "group": "artifacts",
+      "handler": "_handle_mesh_artifact_purge",
+      "id": "post:/mesh/artifacts/purge",
+      "method": "POST",
+      "path": "/mesh/artifacts/purge",
+      "request": {
+        "argument_kind": "data",
+        "body": {
+          "limit": "integer"
+        }
+      },
+      "response": {
+        "schema_available": true,
+        "schema_ref": "ArtifactPurgeResponse",
+        "type": "object"
+      }
+    }
+  ],
+  "groups": {
+    "artifacts": {
+      "count": 8,
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    "control": {
+      "count": 1,
+      "methods": [
+        "GET"
+      ]
+    },
+    "missions": {
+      "count": 22,
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    "ops": {
+      "count": 31,
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    },
+    "runtime": {
+      "count": 32,
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    }
+  },
+  "protocol_surface": "/mesh/*",
+  "schema_count": 75,
+  "schema_version": "ocp-protocol-schemas/v1alpha1",
+  "schemas": {
+    "AppHistorySampleRequest": {
+      "properties": {
+        "source": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "AppHistorySampleResponse": {
+      "properties": {
+        "retention_limit": {
+          "type": "integer"
+        },
+        "sample": {
+          "$ref": "#/schemas/AppStatusSample"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "sample"
+      ],
+      "type": "object"
+    },
+    "AppStatus": {
+      "description": "Operator-facing compact status for the installable OCP app home.",
+      "properties": {
+        "app_urls": {
+          "properties": {
+            "app_url": {
+              "type": "string"
+            },
+            "base_url": {
+              "type": "string"
+            },
+            "control_url": {
+              "type": "string"
+            },
+            "lan_urls": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "phone_url": {
+              "type": "string"
+            },
+            "setup_url": {
+              "type": "string"
+            },
+            "share_advice": {
+              "type": "string"
+            },
+            "sharing_mode": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "approvals": {
+          "type": "object"
+        },
+        "artifact_sync": {
+          "type": "object"
+        },
+        "autonomy": {
+          "type": "object"
+        },
+        "execution_readiness": {
+          "$ref": "#/schemas/ExecutionReadiness"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "latest_proof": {
+          "type": "object"
+        },
+        "mesh_quality": {
+          "properties": {
+            "healthy_routes": {
+              "type": "integer"
+            },
+            "label": {
+              "type": "string"
+            },
+            "operator_summary": {
+              "type": "string"
+            },
+            "peer_count": {
+              "type": "integer"
+            },
+            "route_count": {
+              "type": "integer"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "next_actions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "node": {
+          "type": "object"
+        },
+        "protocol": {
+          "type": "object"
+        },
+        "route_health": {
+          "$ref": "#/schemas/RouteHealthList"
+        },
+        "setup": {
+          "properties": {
+            "bind_mode": {
+              "type": "string"
+            },
+            "blocker_code": {
+              "type": "string"
+            },
+            "blocking_issue": {
+              "type": "string"
+            },
+            "device_roles": {
+              "items": {
+                "properties": {
+                  "display_name": {
+                    "type": "string"
+                  },
+                  "peer_id": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "summary": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "healthy_route_count": {
+              "type": "integer"
+            },
+            "known_peer_count": {
+              "type": "integer"
+            },
+            "label": {
+              "type": "string"
+            },
+            "latest_proof_status": {
+              "type": "string"
+            },
+            "next_fix": {
+              "type": "string"
+            },
+            "operator_summary": {
+              "type": "string"
+            },
+            "phone_url": {
+              "type": "string"
+            },
+            "primary_action": {
+              "type": "string"
+            },
+            "primary_peer": {
+              "properties": {
+                "display_name": {
+                  "type": "string"
+                },
+                "peer_id": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "route": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "summary": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "recovery_state": {
+              "type": "string"
+            },
+            "route_count": {
+              "type": "integer"
+            },
+            "status": {
+              "type": "string"
+            },
+            "story": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "timeline": {
+              "items": {
+                "$ref": "#/schemas/SetupTimelineEvent"
+              },
+              "type": "array"
+            },
+            "token_status": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "node",
+        "app_urls",
+        "mesh_quality",
+        "setup",
+        "next_actions"
+      ],
+      "type": "object"
+    },
+    "AppStatusHistory": {
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "samples": {
+          "items": {
+            "$ref": "#/schemas/AppStatusSample"
+          },
+          "type": "array"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "count",
+        "samples"
+      ],
+      "type": "object"
+    },
+    "AppStatusSample": {
+      "description": "Operator/app-facing normalized app status point for local charts.",
+      "properties": {
+        "artifact_verified_count": {
+          "type": "integer"
+        },
+        "execution_ready_targets": {
+          "type": "integer"
+        },
+        "healthy_route_count": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "known_peer_count": {
+          "type": "integer"
+        },
+        "latest_proof_status": {
+          "type": "string"
+        },
+        "local_ready_workers": {
+          "type": "integer"
+        },
+        "mesh_score": {
+          "type": "integer"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "payload": {
+          "type": "object"
+        },
+        "pending_approvals": {
+          "type": "integer"
+        },
+        "route_count": {
+          "type": "integer"
+        },
+        "sampled_at": {
+          "type": "string"
+        },
+        "setup_status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "sampled_at",
+        "node_id",
+        "mesh_score"
+      ],
+      "type": "object"
+    },
+    "ApprovalList": {
+      "properties": {
+        "approvals": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Artifact": {
+      "properties": {
+        "artifact_kind": {
+          "type": "string"
+        },
+        "content": {
+          "type": "any"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "descriptor": {
+          "$ref": "#/schemas/ArtifactDescriptor"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "size_bytes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "digest",
+        "media_type",
+        "artifact_kind"
+      ],
+      "type": "object"
+    },
+    "ArtifactDescriptor": {
+      "properties": {
+        "annotations": {
+          "type": "object"
+        },
+        "artifact_id": {
+          "type": "string"
+        },
+        "artifact_kind": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "role": {
+          "type": "string"
+        },
+        "size_bytes": {
+          "type": "integer"
+        },
+        "uri": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "digest"
+      ],
+      "type": "object"
+    },
+    "ArtifactGraphReplicateResponse": {
+      "properties": {
+        "artifacts": {
+          "items": {
+            "$ref": "#/schemas/Artifact"
+          },
+          "type": "array"
+        },
+        "governance": {
+          "type": "object"
+        },
+        "graph": {
+          "type": "object"
+        },
+        "remote_auth": {
+          "$ref": "#/schemas/ArtifactReplicationAuth"
+        },
+        "root": {
+          "$ref": "#/schemas/ArtifactReplicateResponse"
+        },
+        "route_proof": {
+          "type": "object"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "type": "object"
+    },
+    "ArtifactList": {
+      "properties": {
+        "artifacts": {
+          "items": {
+            "$ref": "#/schemas/Artifact"
+          },
+          "type": "array"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ArtifactMirrorVerification": {
+      "properties": {
+        "artifact": {
+          "$ref": "#/schemas/Artifact"
+        },
+        "artifact_id": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "verification": {
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ArtifactPinResponse": {
+      "properties": {
+        "artifact": {
+          "$ref": "#/schemas/Artifact"
+        },
+        "artifact_id": {
+          "type": "string"
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ArtifactPublishRequest": {
+      "properties": {
+        "artifact": {
+          "type": "object"
+        },
+        "content": {
+          "type": "any"
+        },
+        "descriptor": {
+          "$ref": "#/schemas/ArtifactDescriptor"
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ArtifactPublishResponse": {
+      "properties": {
+        "artifact": {
+          "$ref": "#/schemas/Artifact"
+        },
+        "descriptor": {
+          "$ref": "#/schemas/ArtifactDescriptor"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ArtifactPurgeResponse": {
+      "properties": {
+        "artifacts": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "kept": {
+          "type": "integer"
+        },
+        "purged": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ArtifactReplicateRequest": {
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "base_url": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "pin": {
+          "type": "boolean"
+        },
+        "remote_auth": {
+          "$ref": "#/schemas/ArtifactReplicationAuth"
+        }
+      },
+      "type": "object"
+    },
+    "ArtifactReplicateResponse": {
+      "properties": {
+        "artifact": {
+          "$ref": "#/schemas/Artifact"
+        },
+        "governance": {
+          "type": "object"
+        },
+        "remote_auth": {
+          "$ref": "#/schemas/ArtifactReplicationAuth"
+        },
+        "route_proof": {
+          "type": "object"
+        },
+        "source": {
+          "type": "object"
+        },
+        "status": {
+          "type": "string"
+        },
+        "verification": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "type": "object"
+    },
+    "ArtifactReplicationAuth": {
+      "description": "Explicit remote-content authorization. Tokens and grant proof material are request-only and must never be persisted or echoed.",
+      "properties": {
+        "grant": {
+          "$ref": "#/schemas/CapabilityGrant"
+        },
+        "grant_id": {
+          "type": "string"
+        },
+        "redacted": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "AutonomicAction": {
+      "properties": {
+        "created_at": {
+          "type": "string"
+        },
+        "details": {
+          "type": "object"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "status",
+        "summary",
+        "created_at"
+      ],
+      "type": "object"
+    },
+    "AutonomicActivateRequest": {
+      "properties": {
+        "actor_agent_id": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "max_enlist": {
+          "type": "integer"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "repair": {
+          "type": "boolean"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "run_proof": {
+          "type": "boolean"
+        },
+        "scan_timeout": {
+          "type": "number"
+        },
+        "timeout": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "AutonomicMeshStatus": {
+      "properties": {
+        "connectivity": {
+          "type": "object"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "helper_autonomy": {
+          "type": "object"
+        },
+        "last_run": {
+          "type": "object"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "operator_summary": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "pressure": {
+          "type": "object"
+        },
+        "recommended_actions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "routes": {
+          "$ref": "#/schemas/RouteHealthList"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "mode",
+        "routes"
+      ],
+      "type": "object"
+    },
+    "AutonomicRun": {
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/schemas/AutonomicAction"
+          },
+          "type": "array"
+        },
+        "approvals": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "helpers": {
+          "type": "object"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "operator_summary": {
+          "type": "string"
+        },
+        "proof": {
+          "type": "object"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "result": {
+          "type": "object"
+        },
+        "routes": {
+          "$ref": "#/schemas/RouteHealthList"
+        },
+        "run": {
+          "type": "object"
+        },
+        "status": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "summary",
+        "actions"
+      ],
+      "type": "object"
+    },
+    "AutonomousOffloadEvaluation": {
+      "properties": {
+        "approvals": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "decisions": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "eligible_helpers": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "operator_summary": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "CapabilityGrant": {
+      "description": "Alpha signed scoped grant shape for future private artifact and route-scoped capabilities.",
+      "properties": {
+        "audience_peer_id": {
+          "type": "string"
+        },
+        "expires_at": {
+          "type": "string"
+        },
+        "grant_id": {
+          "type": "string"
+        },
+        "issued_at": {
+          "type": "string"
+        },
+        "issuer_peer_id": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "nonce": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/schemas/CapabilityGrantScope"
+        },
+        "signature": {
+          "type": "string"
+        },
+        "signature_scheme": {
+          "type": "string"
+        },
+        "subject_peer_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "grant_id",
+        "issuer_peer_id",
+        "subject_peer_id",
+        "audience_peer_id",
+        "scope",
+        "issued_at",
+        "expires_at",
+        "signature_scheme",
+        "signature"
+      ],
+      "title": "CapabilityGrant",
+      "type": "object"
+    },
+    "CapabilityGrantScope": {
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "artifact_id": {
+          "type": "string"
+        },
+        "constraints": {
+          "type": "object"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "max_uses": {
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "CapabilityGrantScope",
+      "type": "object"
+    },
+    "ConformanceFixture": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "schema_ref": {
+          "type": "string"
+        },
+        "validation": {
+          "type": "object"
+        },
+        "value": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "schema_ref",
+        "value",
+        "validation"
+      ],
+      "type": "object"
+    },
+    "ContinuityRestorePlan": {
+      "properties": {
+        "artifact_readiness": {
+          "type": "object"
+        },
+        "blockers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "governance": {
+          "type": "object"
+        },
+        "recommended_action": {
+          "type": "string"
+        },
+        "recommended_treaty_device": {
+          "type": "object"
+        },
+        "safe_devices": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "status": {
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ContinuityRestorePlanRequest": {
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "constraints": {
+          "type": "object"
+        },
+        "target_peer_id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ContinuityVesselExport": {
+      "properties": {
+        "dry_run": {
+          "type": "boolean"
+        },
+        "governance": {
+          "type": "object"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "vessel": {
+          "$ref": "#/schemas/ArtifactDescriptor"
+        },
+        "witness": {
+          "$ref": "#/schemas/ArtifactDescriptor"
+        }
+      },
+      "type": "object"
+    },
+    "ContinuityVesselExportRequest": {
+      "properties": {
+        "dry_run": {
+          "type": "boolean"
+        },
+        "include_artifacts": {
+          "type": "boolean"
+        },
+        "metadata": {
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ContinuityVesselVerification": {
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "governance": {
+          "type": "object"
+        },
+        "referenced_artifacts": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "status": {
+          "type": "string"
+        },
+        "valid": {
+          "type": "boolean"
+        },
+        "vessel": {
+          "type": "object"
+        },
+        "witnesses": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ContractSnapshot": {
+      "properties": {
+        "conformance": {
+          "$ref": "#/schemas/ProtocolConformanceSnapshot"
+        },
+        "contract_version": {
+          "type": "string"
+        },
+        "endpoint_count": {
+          "type": "integer"
+        },
+        "endpoints": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "groups": {
+          "type": "object"
+        },
+        "protocol_surface": {
+          "type": "string"
+        },
+        "schema_count": {
+          "type": "integer"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "schemas": {
+          "type": "object"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "contract_version",
+        "schema_version",
+        "protocol_surface",
+        "endpoints",
+        "schemas"
+      ],
+      "type": "object"
+    },
+    "ControlStreamSSE": {
+      "description": "Server-sent event stream carrying compact control-deck updates.",
+      "properties": {
+        "data": {
+          "type": "object"
+        },
+        "event": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "CooperativeTask": {
+      "properties": {
+        "child_job_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "shards": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "state": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "CooperativeTaskList": {
+      "properties": {
+        "cooperative_tasks": {
+          "items": {
+            "$ref": "#/schemas/CooperativeTask"
+          },
+          "type": "array"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/schemas/CooperativeTask"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "DeviceProfileResponse": {
+      "properties": {
+        "device_profile": {
+          "type": "object"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "updated": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "DiscoveryCandidateList": {
+      "properties": {
+        "candidates": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "EventStreamSnapshot": {
+      "properties": {
+        "cursor": {
+          "type": "any"
+        },
+        "events": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "peers": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ExecutionReadiness": {
+      "properties": {
+        "local": {
+          "type": "object"
+        },
+        "operator_summary": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "targets": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "worker_capacity": {
+          "items": {
+            "$ref": "#/schemas/WorkerCapacity"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "HandshakeResponse": {
+      "properties": {
+        "manifest": {
+          "type": "object"
+        },
+        "operator_summary": {
+          "type": "string"
+        },
+        "peer": {
+          "type": "object"
+        },
+        "status": {
+          "type": "string"
+        },
+        "trust_tier": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "HelperList": {
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "helpers": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Job": {
+      "properties": {
+        "created_at": {
+          "type": "string"
+        },
+        "dispatch_mode": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "origin_peer_id": {
+          "type": "string"
+        },
+        "policy": {
+          "type": "object"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "target_peer_id": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "JobSubmission": {
+      "properties": {
+        "artifact_inputs": {
+          "items": {
+            "$ref": "#/schemas/ArtifactDescriptor"
+          },
+          "type": "array"
+        },
+        "continuity": {
+          "type": "object"
+        },
+        "dispatch_mode": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "payload": {
+          "type": "object"
+        },
+        "policy": {
+          "type": "object"
+        },
+        "requirements": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "JobSubmissionEnvelope": {
+      "description": "A direct job object or a signed envelope carrying a job submission body.",
+      "one_of": [
+        {
+          "$ref": "#/schemas/JobSubmission"
+        },
+        {
+          "$ref": "#/schemas/SignedEnvelope"
+        }
+      ],
+      "type": "object"
+    },
+    "JobSubmissionRequest": {
+      "description": "Accepted job submission transport shapes for the HTTP surface.",
+      "one_of": [
+        {
+          "$ref": "#/schemas/SignedEnvelope"
+        },
+        {
+          "properties": {
+            "job": {
+              "$ref": "#/schemas/JobSubmission"
+            }
+          },
+          "required": [
+            "job"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/schemas/JobSubmission"
+        }
+      ],
+      "type": "object"
+    },
+    "MeshManifest": {
+      "properties": {
+        "agent_presence": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "continuity_capabilities": {
+          "type": "object"
+        },
+        "device_profile": {
+          "type": "object"
+        },
+        "governance_summary": {
+          "type": "object"
+        },
+        "implementation": {
+          "type": "object"
+        },
+        "organism_card": {
+          "$ref": "#/schemas/PeerCard"
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "protocol_release": {
+          "type": "string"
+        },
+        "protocol_short_name": {
+          "type": "string"
+        },
+        "protocol_version": {
+          "type": "string"
+        },
+        "queue_metrics": {
+          "type": "object"
+        },
+        "sync_policy": {
+          "type": "object"
+        },
+        "treaty_capabilities": {
+          "type": "object"
+        },
+        "workers": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "protocol",
+        "protocol_short_name",
+        "protocol_release",
+        "protocol_version",
+        "organism_card"
+      ],
+      "type": "object"
+    },
+    "MeshPressure": {
+      "properties": {
+        "generated_at": {
+          "type": "string"
+        },
+        "helper_recommended": {
+          "type": "boolean"
+        },
+        "operator_summary": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "pressure": {
+          "type": "object"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Mission": {
+      "properties": {
+        "continuity": {
+          "type": "object"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "intent": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "origin_peer_id": {
+          "type": "string"
+        },
+        "policy": {
+          "type": "object"
+        },
+        "priority": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "target_strategy": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        },
+        "workload_class": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "MissionContinuitySummary": {
+      "properties": {
+        "checkpoints": {
+          "items": {
+            "$ref": "#/schemas/ArtifactDescriptor"
+          },
+          "type": "array"
+        },
+        "continuity": {
+          "type": "object"
+        },
+        "governance": {
+          "type": "object"
+        },
+        "latest_checkpoint_ref": {
+          "$ref": "#/schemas/ArtifactDescriptor"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "recommended_treaty_device": {
+          "type": "object"
+        },
+        "safe_devices": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "status": {
+          "type": "string"
+        },
+        "treaty_validation": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "mission_id",
+        "continuity"
+      ],
+      "type": "object"
+    },
+    "MissionList": {
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "missions": {
+          "items": {
+            "$ref": "#/schemas/Mission"
+          },
+          "type": "array"
+        },
+        "peer_id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "NotificationList": {
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "notifications": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "peer_id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Object": {
+      "description": "Loose object fallback for routes whose detailed response contract has not been promoted yet.",
+      "type": "object"
+    },
+    "PeerAdvisory": {
+      "properties": {
+        "continuity_capabilities": {
+          "type": "object"
+        },
+        "missing_capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "operator_summary": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "recommended_action": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "treaty_capabilities": {
+          "type": "object"
+        },
+        "treaty_compatibility": {
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "PeerCard": {
+      "properties": {
+        "capability_cards": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "continuity_capabilities": {
+          "type": "object"
+        },
+        "device_profile": {
+          "type": "object"
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "endpoint_url": {
+          "type": "string"
+        },
+        "governance_summary": {
+          "type": "object"
+        },
+        "habitat_roles": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "organism_id": {
+          "type": "string"
+        },
+        "protocol_version": {
+          "type": "string"
+        },
+        "public_key": {
+          "type": "string"
+        },
+        "treaty_capabilities": {
+          "type": "object"
+        },
+        "trust_tier": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "organism_id",
+        "node_id",
+        "public_key",
+        "protocol_version"
+      ],
+      "type": "object"
+    },
+    "PeerList": {
+      "properties": {
+        "advisories": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "peers": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ProtocolConformanceSnapshot": {
+      "properties": {
+        "fixture_count": {
+          "type": "integer"
+        },
+        "fixtures": {
+          "items": {
+            "$ref": "#/schemas/ConformanceFixture"
+          },
+          "type": "array"
+        },
+        "invalid_fixture_count": {
+          "type": "integer"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "fixture_count",
+        "invalid_fixture_count",
+        "fixtures"
+      ],
+      "type": "object"
+    },
+    "QueueEventList": {
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "events": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "next_cursor": {
+          "type": "any"
+        },
+        "peer_id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "QueueMessageList": {
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "messages": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "queue": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "QueueMetrics": {
+      "properties": {
+        "depth": {
+          "type": "integer"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "metrics": {
+          "type": "object"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "RouteCandidate": {
+      "properties": {
+        "base_url": {
+          "type": "string"
+        },
+        "checked_at": {
+          "type": "string"
+        },
+        "failure_count": {
+          "type": "integer"
+        },
+        "freshness": {
+          "type": "string"
+        },
+        "last_error": {
+          "type": "string"
+        },
+        "last_success_at": {
+          "type": "string"
+        },
+        "latency_ms": {
+          "type": "any"
+        },
+        "next_probe_after": {
+          "type": "string"
+        },
+        "observed_peer_id": {
+          "type": "string"
+        },
+        "operator_hint": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "base_url",
+        "source",
+        "status"
+      ],
+      "type": "object"
+    },
+    "RouteHealth": {
+      "properties": {
+        "age_seconds": {
+          "type": "any"
+        },
+        "best_route": {
+          "type": "string"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/schemas/RouteCandidate"
+          },
+          "type": "array"
+        },
+        "checked_at": {
+          "type": "string"
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "failure_count": {
+          "type": "integer"
+        },
+        "freshness": {
+          "type": "string"
+        },
+        "last_error": {
+          "type": "string"
+        },
+        "last_reachable_base_url": {
+          "type": "string"
+        },
+        "last_success_at": {
+          "type": "string"
+        },
+        "next_probe_after": {
+          "type": "string"
+        },
+        "operator_hint": {
+          "type": "string"
+        },
+        "operator_summary": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "peer_id",
+        "status",
+        "candidates"
+      ],
+      "type": "object"
+    },
+    "RouteHealthList": {
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "healthy": {
+          "type": "integer"
+        },
+        "operator_summary": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "routes": {
+          "items": {
+            "$ref": "#/schemas/RouteHealth"
+          },
+          "type": "array"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "routes"
+      ],
+      "type": "object"
+    },
+    "RouteProbeRequest": {
+      "properties": {
+        "base_url": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "timeout": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "RouteProbeResult": {
+      "properties": {
+        "best_route": {
+          "type": "string"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/schemas/RouteCandidate"
+          },
+          "type": "array"
+        },
+        "checked": {
+          "type": "integer"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "operator_hint": {
+          "type": "string"
+        },
+        "operator_summary": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "reachable": {
+          "type": "integer"
+        },
+        "results": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "type": "object"
+    },
+    "RouteProofFreshness": {
+      "properties": {
+        "best_route": {
+          "type": "string"
+        },
+        "checked_at": {
+          "type": "string"
+        },
+        "freshness": {
+          "type": "string"
+        },
+        "last_success_at": {
+          "type": "string"
+        },
+        "operator_summary": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SchedulerDecisionList": {
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "decisions": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SecretList": {
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "secrets": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "SetupTimelineEvent": {
+      "properties": {
+        "created_at": {
+          "type": "string"
+        },
+        "details": {
+          "type": "object"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "status",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "SignedEnvelope": {
+      "properties": {
+        "body": {
+          "type": "object"
+        },
+        "request": {
+          "properties": {
+            "implementation": {
+              "type": "string"
+            },
+            "node_id": {
+              "type": "string"
+            },
+            "nonce": {
+              "type": "string"
+            },
+            "protocol_family": {
+              "type": "string"
+            },
+            "protocol_release": {
+              "type": "string"
+            },
+            "protocol_version": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "signature": {
+              "type": "string"
+            },
+            "signature_scheme": {
+              "type": "string"
+            },
+            "timestamp": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          "required": [
+            "node_id",
+            "timestamp",
+            "nonce",
+            "request_id",
+            "protocol_family",
+            "protocol_release",
+            "protocol_version",
+            "signature_scheme",
+            "signature"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "request",
+        "body"
+      ],
+      "type": "object"
+    },
+    "Treaty": {
+      "properties": {
+        "created_at": {
+          "type": "string"
+        },
+        "document": {
+          "type": "object"
+        },
+        "id": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "status": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "treaty_type": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "treaty_type",
+        "status",
+        "document"
+      ],
+      "type": "object"
+    },
+    "TreatyAudit": {
+      "properties": {
+        "guidance": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "validation": {
+          "properties": {
+            "inactive": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "missing": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "required": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "satisfied": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "status",
+        "validation"
+      ],
+      "type": "object"
+    },
+    "TreatyAuditRequest": {
+      "properties": {
+        "metadata": {
+          "type": "object"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "treaty_requirements": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "TreatyList": {
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "treaties": {
+          "items": {
+            "$ref": "#/schemas/Treaty"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "WorkerCapacity": {
+      "properties": {
+        "available_slots": {
+          "type": "integer"
+        },
+        "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_concurrent_jobs": {
+          "type": "integer"
+        },
+        "operator_summary": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "resources": {
+          "type": "object"
+        },
+        "status": {
+          "type": "string"
+        },
+        "worker_id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "WorkerList": {
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "peer_id": {
+          "type": "string"
+        },
+        "workers": {
+          "items": {
+            "$ref": "#/schemas/WorkerCapacity"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "status": "ok"
+}
